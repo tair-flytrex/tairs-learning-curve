@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tair's Learning Curve</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+/* Main page only: the list of pages. Shared styles are in style.css */
+main { padding-block: 24px 64px; }
+main h2 { margin: 0 0 10px; }
+.pages { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.pages a {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 22px;
+}
+.pages a:hover, .pages a:focus-visible { border-color: var(--accent); outline: none; }
+.pages .name { font-size: 22px; font-weight: 600; color: var(--accent); }
+.pages .about { display: block; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <div class="eyebrow">Mission Computer · onboard-ng</div>
+        <h1>Tair's Learning Curve</h1>
+        <p>My notes from learning the Mission Computer codebase.</p>
+    </header>
+    <main>
+    <h2 class="label">Pages</h2>
+    <ul class="pages">
+        <li>
+            <a href="glossary.html">
+                <span class="name">Mission Computer Glossary</span>
+                <span class="about">Searchable list of the abbreviations and service names in the docs, with links between related terms.</span>
+            </a>
+        </li>
+        <li>
+            <a href="qa.html">
+                <span class="name">Mission Computer Q&amp;A</span>
+                <span class="about">Questions I asked about the project and their answers, tagged by topic and linked to the glossary.</span>
+            </a>
+        </li>
+        <!-- Add new pages here: copy the <li> above and change the link, name and description. -->
+    </ul>
+    </main>
+
+    <footer>Open these files straight from disk. They don't need a server.</footer>
+</div>
+</body>
+</html>

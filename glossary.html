@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Computer Glossary</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+/* Glossary only: sticky search bar, section chips, term / definition rows. Shared styles are in style.css */
+html { scroll-padding-top: 150px; }
+.bar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+    background: var(--bg); padding-block: 14px 10px; border-bottom: 1px solid var(--line);
+}
+.search { position: relative; }
+.search input {
+    width: 100%; font: inherit; font-size: 19px; color: var(--fg);
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 11px 70px 11px 14px;
+}
+.search input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.search kbd {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    font-family: var(--font-mono); font-size: 14.5px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px;
+}
+.meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 16px; color: var(--muted); flex-wrap: wrap; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.chips a {
+    font-size: 15.5px; text-decoration: none; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: var(--surface);
+}
+.chips a:hover, .chips a:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+.chips a .n { color: var(--muted); font-family: var(--font-mono); font-size: 14px; margin-left: 4px; }
+main { padding-block: 8px 64px; }
+section.group { margin-top: 28px; }
+section.group h2 { margin: 0 0 6px; display: flex; align-items: baseline; gap: 10px; }
+section.group h2 .num { color: var(--accent); }
+.entries { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.entry {
+    display: grid; grid-template-columns: 270px 1fr; gap: 6px 20px;
+    padding: 14px 18px; border-top: 1px solid var(--line); transition: background 0.6s;
+}
+.entry:first-child { border-top: 0; }
+.entry.flash { background: var(--flash); transition: none; }
+.term { font-family: var(--font-mono); font-weight: 600; font-size: 18px; word-break: break-word; min-width: 0; }
+.term .aka { display: block; font-weight: 400; color: var(--muted); font-size: 15.5px; }
+.body { min-width: 0; }
+.desc { margin: 0; }
+.desc code, .term code { font-family: var(--font-mono); font-size: 0.9em; }
+.desc code { background: var(--accent-soft); padding: 0 4px; border-radius: 3px; }
+.flag {
+    display: inline-block; font-size: 14.5px; color: var(--warn); background: var(--warn-soft);
+    border-radius: 4px; padding: 0 6px; margin-left: 6px; white-space: nowrap;
+}
+.rel { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 16px; }
+.rel span { color: var(--muted); }
+.rel a { color: var(--accent); text-decoration: none; font-family: var(--font-mono); font-size: 15.5px; }
+.rel a:hover, .rel a:focus-visible { text-decoration: underline; outline: none; }
+mark { background: var(--flash); color: inherit; border-radius: 2px; }
+.empty { text-align: center; color: var(--muted); padding: 48px 0; }
+@media (max-width: 620px) {
+    .entry { grid-template-columns: 1fr; padding: 12px 14px; }
+    html { scroll-padding-top: 190px; }
+}
+@media (prefers-reduced-motion: reduce) { .entry { transition: none; } html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="index.html">&larr; Tair's Learning Curve</a>
+        <div class="eyebrow">onboard-ng · docs</div>
+        <h1>Mission Computer Glossary</h1>
+        <p>Abbreviations and service names used across the Mission Computer docs. Click a related term to jump to it.</p>
+    </header>
+    <div class="bar">
+        <div class="search">
+            <input id="q" type="search" placeholder="Search terms and definitions, e.g. RTK, :50053, interlock" autocomplete="off" aria-label="Search the glossary">
+            <kbd>/</kbd>
+        </div>
+        <div class="meta"><span id="count"></span><span>Tagged <span class="flag" style="margin:0">not expanded in docs</span> = meaning inferred from context</span></div>
+        <nav class="chips" id="chips" aria-label="Sections"></nav>
+    </div>
+    <main id="main"></main>
+    <div class="empty" id="empty" hidden>No terms match. Try a shorter word or a port number.</div>
+    <footer>Source: <code>docs/</code> in mission-computer. </footer>
+</div>
+
+<script>
+const SECTIONS = [
+    ["proc", "On-aircraft processes"],
+    ["ground", "Ground & cloud services"],
+    ["hw", "Hardware & devices"],
+    ["flight", "Flight, navigation & mission"],
+    ["proto", "Protocols & interfaces"],
+    ["mq", "RabbitMQ exchanges & topics"],
+    ["grpc", "gRPC services & ports"],
+    ["ota", "OTA update"],
+    ["build", "Build, deployment & tooling"],
+    ["test", "Testing"],
+];
+
+// [id, term, aka, section, description, related ids, notExpandedInDocs]
+const E = [
+    // On-aircraft processes
+    ["emc", "emc", "Embedded Mission Computer", "proc", "The Java/Kotlin app in <code>app/</code>. Holds the ground link to Mission Manager and Oversight, forwards every server message to drone_facade, relays the replies, drives the FTS/parachute and the delivery device, and mirrors the facade's mission state. Called <code>mc</code> in the cloud SITL farm.", ["drone_facade", "mm", "oversight", "fts", "vesc", "jsonrpc", "facaderesp", "ftsversion", "rdid"]],
+    ["drone_facade", "drone_facade", "the mission brain", "proc", "Python. Converts the forwarded server messages (old-API JSON to new-API protobuf), plans and executes GCS missions item by item, monitors altimeters and failure modes. Serves <code>DroneFacadeAPI</code> on :50051.", ["emc", "fcm", "dronefacadeapi", "facaderesp", "interlock", "altimeter-ex", "failuremode", "gcs"]],
+    ["fcm", "fcm", "Flight Controller Manager", "proc", "Python. The only process that speaks MAVLink to ArduPilot. Publishes FC telemetry as protobuf on the <code>fcm</code> exchange and serves <code>FcmAPI</code> on :50052 (missions, params, reboot, Remote ID, log download).", ["fc", "mavlink", "fcmapi", "fcm-ex", "sitl", "uavcanver", "drone_facade"]],
+    ["rtk_distributer", "rtk_distributer", "", "proc", "Python. Pulls RTCM3 corrections from an NTRIP caster, filters them to the usable IDs and sends them to the GNSS receivers through dronecan_communicator. Controlled through a local TCP JSON socket on 127.0.0.1:9870.", ["rtk", "rtcm", "ntrip", "ntrip-caster", "dc-req", "fnur", "gpgga"]],
+    ["drone_periph", "drone_periph", "", "proc", "Python. Reads the Laserworks laser altimeter over serial, polls the cellular modem over QMI every 500 ms, and serves <code>DronePeriph</code> (RGB LED) on :50054.", ["altimeter-ex", "cellular-ex", "qmi", "laserworks", "led", "droneperiph"]],
+    ["dronecan_communicator", "dronecan_communicator", "", "proc", "Python. Gateway to the DroneCAN/UAVCAN bus (node id 75, <code>com.flytrex.mc-communicator</code>). Bridges RabbitMQ requests to CAN and back, and flashes the CAN devices. Serves <code>DronecanFirmware</code> on :50053.", ["dronecan", "socketcan", "canredblue", "dronecanfirmware", "dc-req", "dc-ev", "dsdl", "firmware_updater"]],
+    ["software_updater", "software_updater", "", "proc", "Python. Entry point of the board stack and owner of OTA updates: runs system_config, starts the other containers, polls Oversight, installs profiles and holds the mission interlock. Serves <code>SoftwareUpdaterAPI</code> on :50055.", ["ota", "oversight", "interlock", "firmware_updater", "system_config", "softwareupdaterapi", "profile", "updatestates", "sustate"]],
+    ["firmware_updater", "firmware_updater", "", "proc", "Python one-shot container. Flashes the FC, FTS, BMS, FNU and FPC to the versions in its <code>config.yaml</code>, reports each result to software_updater, then exits. Runs only when an update carries firmware.", ["software_updater", "fc", "fts", "bms", "fnu", "fpc", "dronecanfirmware", "apj"]],
+    ["system_config", "system_config", "", "proc", "Shell one-shot container, built by CI as the <code>system-init</code> image. Applies host settings that ship with the stack: service-log format and rotation, the Remote ID Wi-Fi access point, modem bands. Runs on every software_updater start.", ["software_updater", "hostapd", "rsyslog", "mmcli", "ap", "rdid", "pid"]],
+    ["rabbitmq", "rabbitmq", "", "proc", "The local RabbitMQ broker: AMQP on :5672, management UI on :15672. On the aircraft <code>rabbitmq:3.13.7-alpine</code>, bound to the loopback.", ["amqp", "mq", "fcm-ex", "proto"]],
+
+    // Ground and cloud
+    ["gcs", "GCS", "Ground Control Station", "ground", "The Flytrex ground and cloud stack that sends missions to the aircraft. Its contracts live in <code>mc_gcs_sdk/protos</code>.", ["mm", "oversight", "gcssdk", "rpic"]],
+    ["mm", "MM", "Mission Manager", "ground", "Mission assignment and progress, on :7771. Bidirectional WebSocket/JSON-RPC link to emc (e.g. SetMission, Takeoff, TriggerParachute).", ["emc", "jsonrpc", "ws", "gcs", "puppets"]],
+    ["oversight", "Oversight", "", "ground", "Configuration source on :7700 (<code>get_configuration</code>). Since 3.3 also the vehicle-update REST API that software_updater calls (<code>/api/v3/vehicle/{id}/update/...</code>).", ["software_updater", "rest", "ota", "profile", "puppets"]],
+    ["controlhub", "ControlHub", "", "ground", "Where CI registers each build's compose file. Profiles select builds from it.", ["ci", "profile", "onboard-ng-board"]],
+    ["gcslogger", "GCS MC logger", "", "ground", "Log streaming endpoint on :8002.", ["s3", "gcs"]],
+    ["s3", "S3", "Amazon Simple Storage Service", "ground", "Log upload (:8003) and the presigned URLs for profile download and update-log upload.", ["aws", "profile", "puppets"]],
+    ["ntrip-caster", "NTRIP caster", "", "ground", "RTK base-station service that rtk_distributer connects to for corrections.", ["ntrip", "rtk", "rtk_distributer"]],
+    ["registry", "Image registry", "", "ground", "Docker registry the profile's images are pulled from (<code>MC_REGISTRY</code>). The offer from Oversight carries the login.", ["profile", "software_updater", "ecr"]],
+    ["gemfury", "Gemfury", "", "ground", "Package registry. <code>GEMFURY_TOKEN</code> must be set in <code>.env</code> to build.", ["dockerw"]],
+
+    // Hardware
+    ["mc", "MC", "Mission Computer", "hw", "The onboard companion computer and the software on it (this repo, onboard-ng).", ["som", "onboard-ng", "emc"]],
+    ["som", "SOM", "System-on-Module", "hw", "Variscite VAR-SOM-MX8M-MINI (\"m8mini\"), running Linux. The MC services run on it as Docker containers.", ["soc", "mc"]],
+    ["soc", "SoC", "System-on-Chip", "hw", "NXP i.MX 8M Mini: quad-core 64-bit ARM Cortex-A53 plus a Cortex-M4.", ["som"]],
+    ["fc", "FC", "Flight Controller", "hw", "The ArduPilot board. fcm talks to it over USB serial with MAVLink; firmware_updater flashes it.", ["fcm", "mavlink", "sitl", "apj", "firmware_updater"]],
+    ["fts", "FTS", "Flight Termination System", "hw", "The parachute system (<code>FlytrexFts</code>), driven by emc. Not a CAN node, so emc reads its version over UART and publishes it.", ["emc", "ftsversion", "firmware_updater", "uart"]],
+    ["bms", "BMS", "Battery Management System", "hw", "CAN nodes <code>bms1</code>/<code>bms2</code>. Flashed one node at a time.", ["dronecan", "firmware_updater", "uavcanver"]],
+    ["esc", "ESC", "Electronic Speed Controller", "hw", "<code>esc1..esc8</code> on the CAN bus. Their versions stand for the FPC version.", ["fpc", "dronecan", "uavcanver"]],
+    ["pdb", "PDB", "Power Distribution Board", "hw", "A CAN node reporting its version through fcm.", ["dronecan", "uavcanver"], true],
+    ["fnu", "FNU", "", "hw", "CAN navigation/GNSS unit (<code>fnu1</code>/<code>fnu2</code>). The only device that can update its bootloader over DroneCAN.", ["fnur", "gnss", "firmware_updater", "dronecan"], true],
+    ["fnur", "FNUR", "", "hw", "The FNU in its role as GNSS/RTK receiver: where rtk_distributer's corrections end up.", ["fnu", "rtk", "gnss"], true],
+    ["fpc", "FPC", "", "hw", "CAN device flashed by firmware_updater; its version is read from the <code>esc1..8</code> nodes.", ["esc", "firmware_updater"], true],
+    ["gnss", "GNSS", "Global Navigation Satellite System", "hw", "The satellite positioning receivers on the CAN bus.", ["gps", "rtk", "fnu"]],
+    ["gps", "GPS", "Global Positioning System", "hw", "The US GNSS constellation; used loosely for positioning in general.", ["gnss", "rtk"]],
+    ["vesc", "VESC", "", "hw", "Motor controller that drives the delivery device / hoist (<code>VescBox</code> in emc).", ["emc", "dock"]],
+    ["imu", "IMU", "Inertial Measurement Unit", "hw", "Accelerometer/gyro data; published by fcm as the <code>Imu</code> topic.", ["fcm-ex", "ekf"]],
+    ["led", "LED", "Light-Emitting Diode", "hw", "RGB status LED driven by drone_periph. Blinks white while firmware_updater runs.", ["droneperiph", "drone_periph"]],
+    ["gpio", "GPIO", "General-Purpose Input/Output", "hw", "Digital pins; drone_periph gets access to the GPIO chips.", ["ioio", "drone_periph"]],
+    ["uart", "UART", "Universal Asynchronous Receiver-Transmitter", "hw", "Serial port. Links to the FC, FTS and laser altimeter.", ["usbcdc", "fc", "fts", "laserworks"]],
+    ["usbcdc", "USB CDC", "USB Communications Device Class", "hw", "The <code>ttyACM*</code> serial devices: FC, FTS, VESC, altimeter.", ["uart"]],
+    ["rc", "RC", "Radio Control", "hw", "Manual pilot control. emc's <code>RcInControlState</code> means the pilot took over.", ["rpic"]],
+    ["rdid", "Remote ID", "RDID", "hw", "Remote drone identification broadcast. emc package <code>rdid</code>; system_config sets up its Wi-Fi access point.", ["odid", "ap", "system_config"]],
+    ["odid", "ODID", "Open Drone ID", "hw", "The Remote ID standard. fcm's <code>OpenDroneIdCoordinator</code>.", ["rdid", "fcm"]],
+    ["ioio", "IOIO", "", "hw", "GPIO/UART/servo abstraction over serial in emc (packages <code>ioio</code>, <code>ioio.emc</code>).", ["gpio", "uart", "emc"]],
+    ["avl", "AVL", "", "hw", "An emc accessory package, <code>accessories.avl</code>.", ["emc"], true],
+    ["laserworks", "Laserworks", "", "hw", "Vendor of the laser altimeter that drone_periph reads at 19200 baud.", ["drone_periph", "altimeter-ex"]],
+    ["canredblue", "canred / canblue", "", "hw", "The two SocketCAN interfaces, one per CAN harness. Each runs its own DroneCAN node.", ["socketcan", "dronecan_communicator", "can"]],
+
+    // Flight
+    ["sitl", "SITL", "Software-In-The-Loop", "flight", "Simulated ArduPilot FC, reached by fcm over TCP (default localhost:5762). Used locally, in system tests and in the cloud farm.", ["fc", "beehive", "system_tests", "fcmock"]],
+    ["rtl", "RTL", "Return To Launch", "flight", "Fly back home and land. <code>trigger_rtl</code> in drone_facade.", ["drone_facade", "failuremode"]],
+    ["rtk", "RTK", "Real-Time Kinematic", "flight", "Centimetre-level GNSS positioning from base-station corrections.", ["rtcm", "ntrip", "rtk_distributer", "gnss"]],
+    ["rtcm", "RTCM3", "Radio Technical Commission for Maritime Services, v3", "flight", "The GNSS correction message format rtk_distributer parses and forwards.", ["rtk", "ntrip", "rtk_distributer"]],
+    ["gpgga", "GPGGA", "", "flight", "NMEA GPS fix sentence the NTRIP client uploads to the caster.", ["ntrip", "gps"]],
+    ["ekf", "EKF", "Extended Kalman Filter", "flight", "ArduPilot's state estimator; reported as the <code>EkfStatusFlags</code> topic.", ["imu", "fcm-ex"]],
+    ["ned", "NED", "North-East-Down", "flight", "Local coordinate frame; z points down.", ["msl"]],
+    ["msl", "MSL", "Mean Sea Level", "flight", "Altitude reference used in MAVLink global position targets.", ["ned"]],
+    ["daa", "DAA", "Detect And Avoid", "flight", "Triggers <code>FAILURE_MODE_DESCENDING</code> and a fast release of the package.", ["failuremode", "dock"]],
+    ["rpic", "RPIC", "Remote Pilot In Command", "flight", "The human operator in the GCS (abort, emergency land, confirm loaded).", ["gcs", "rc"]],
+    ["lp", "LP", "Launchpad", "flight", "Pickup-from-launchpad branch in the pickup executor.", ["dock"]],
+    ["modes", "GUIDED / AUTO / LOITER", "", "flight", "ArduPilot copter flight modes. GUIDED is used for dock maneuvers; AUTO for uploaded missions.", ["guid_options", "fc", "wp"]],
+    ["guid_options", "GUID_OPTIONS", "", "flight", "ArduPilot parameter. Bit 6 (value 64) = <code>WP_NAV_FOR_POS_TARGETS</code>, which makes guided targets emit <code>MISSION_ITEM_REACHED</code>.", ["modes", "wp", "fcmock"]],
+    ["wp", "WP", "Waypoint", "flight", "A mission item to fly to.", ["modes", "drone_facade"]],
+    ["safeup", "Safe-up", "safing up", "flight", "Bringing the aircraft to a safe state after landing or a failure (<code>FAILURE_MODE_SAFING_UP</code>).", ["failuremode", "rtl"]],
+    ["failuremode", "Failure mode", "", "flight", "Off-nominal mission behaviour such as SAFING_UP or DESCENDING, run by drone_facade.", ["safeup", "daa", "drone_facade", "rtl"]],
+    ["dock", "Dock / hook / unhook", "", "flight", "Delivery maneuvers: dock enter/exit, lowering and raising the hook, wire drop, fast release.", ["vesc", "daa", "lp", "modes"]],
+    ["c2", "C2", "Command and Control", "flight", "The aircraft's control link. emc's <code>C2Logger</code> writes position, attitude and cellular samples every 500 ms.", ["slog", "cellular-ex"]],
+    ["slog", "SLog", "", "flight", "The mission's structured log that C2Logger writes into (component <code>c2</code>).", ["c2", "emc"], true],
+    ["mcstate", "Mission computer state", "MissionComputerState, onboard_state", "flight", "The state the drone reports to the GCS (e.g. <code>initializing</code>, <code>idle</code>, <code>taking_off</code>, <code>safed_up</code>, <code>fc_loss</code>). emc sends it to Mission Manager as <code>onboard_state</code>; drone_facade sets most values through <code>UpdateMissionComputerState</code>.", ["emc", "drone_facade", "updatestate", "mm", "gcs", "failuremode"]],
+    ["uid", "UID", "Unique Identifier", "flight", "E.g. the mission UID used to find a mission in the logs.", []],
+
+    // Protocols
+    ["grpc", "gRPC", "Google Remote Procedure Call", "proto", "Synchronous request/response between services. Commands and queries that need an answer go here.", ["rpc", "proto", "dronefacadeapi", "fcmapi", "mq"]],
+    ["rpc", "RPC", "Remote Procedure Call", "proto", "A call to a function in another process.", ["grpc", "jsonrpc"]],
+    ["rest", "REST", "Representational State Transfer", "proto", "HTTP API style. Used by software_updater to talk to Oversight.", ["oversight", "api"]],
+    ["api", "API", "Application Programming Interface", "proto", "A defined interface another program calls.", ["rest", "grpc"]],
+    ["jsonrpc", "JSON-RPC", "JSON Remote Procedure Call", "proto", "emc's ground-link protocol, over WebSocket (<code>MissionServer</code>, <code>PROTOCOL_VERSION = 2130</code>).", ["ws", "json", "emc", "mm"]],
+    ["ws", "WS", "WebSocket", "proto", "Persistent bidirectional connection carrying the JSON-RPC ground link.", ["jsonrpc"]],
+    ["json", "JSON", "JavaScript Object Notation", "proto", "Text data format: old-API server messages, the profile's <code>content.json</code>.", ["jsonrpc", "yaml"]],
+    ["yaml", "YAML", "YAML Ain't Markup Language", "proto", "Config format; firmware_updater reads <code>config.yaml</code>.", ["firmware_updater", "json"]],
+    ["amqp", "AMQP", "Advanced Message Queuing Protocol", "proto", "The protocol RabbitMQ speaks, on :5672.", ["rabbitmq", "mq"]],
+    ["mq", "MQ", "Message Queue", "proto", "Shorthand for RabbitMQ (e.g. <code>MQ_EXCHANGE_NAME</code>). Asynchronous telemetry and state go here.", ["rabbitmq", "amqp", "grpc"]],
+    ["mqtt", "MQTT", "Message Queuing Telemetry Transport", "proto", "Only mentioned in a spec as an alternative; not used.", ["mq"]],
+    ["tcp", "TCP", "Transmission Control Protocol", "proto", "Used for the SITL MAVLink link, NTRIP and the rtk_distributer control socket.", ["sitl", "ntrip", "ip"]],
+    ["ssl", "SSL", "Secure Sockets Layer", "proto", "Optional encryption on the NTRIP connection.", ["ntrip"]],
+    ["ip", "IP", "Internet Protocol", "proto", "Network layer; the cellular modem gives the aircraft its IP uplink.", ["tcp", "cellular-ex"]],
+    ["mavlink", "MAVLink", "Micro Air Vehicle Link", "proto", "FC protocol. Dialect <code>ardupilotmega</code>, MAVLink 2, from the vendored <code>ardupilot_mavlink</code> submodule.", ["fcm", "fc", "apj"]],
+    ["can", "CAN / CAN FD", "Controller Area Network, Flexible Data-rate", "proto", "The peripheral bus, run at 1 Mbit/s.", ["socketcan", "dronecan", "canredblue"]],
+    ["socketcan", "SocketCAN", "", "proto", "Linux network-socket interface to CAN.", ["can", "canredblue", "dronecan_communicator"]],
+    ["dronecan", "DroneCAN / UAVCAN", "", "proto", "CAN protocol for drone peripherals (UAVCAN v0 = DroneCAN). Also used for firmware file transfer.", ["dsdl", "can", "dronecan_communicator", "uavcanver"]],
+    ["dsdl", "DSDL", "Data Structure Description Language", "proto", "DroneCAN message definitions, from <code>services/resources/public_regulated_data_types</code>.", ["dronecan"]],
+    ["qmi", "QMI", "Qualcomm MSM Interface", "proto", "Modem control protocol. drone_periph uses libqmi through <code>qmi-proxy</code> (needs root).", ["drone_periph", "cellular-ex", "mmcli"]],
+    ["ntrip", "NTRIP", "Networked Transport of RTCM via Internet Protocol", "proto", "How RTK corrections are streamed from the caster.", ["ntrip-caster", "rtcm", "rtk_distributer"]],
+    ["crc", "CRC", "Cyclic Redundancy Check", "proto", "Checksum the ArduPilot bootloader uses to verify a flash.", ["apj", "firmware_updater"]],
+    ["apj", ".apj", "ArduPilot JSON firmware", "proto", "The firmware file format flashed to the FC and FTS.", ["fc", "fts", "crc"]],
+    ["sha256", "sha256", "", "proto", "SHA-256 hash; every file in a profile zip is checked against it.", ["profile"]],
+    ["ttl", "TTL", "Time To Live", "proto", "Message expiry: altimeter and cellular messages live 1 s, fcm messages 1000 ms.", ["altimeter-ex", "cellular-ex"]],
+    ["proto", "protobuf", "Protocol Buffers", "proto", "Payload format for RabbitMQ and gRPC, serialized with <code>SerializeToString()</code>. Sources in <code>mc_gcs_sdk/protos</code>, <code>internal_sdk/protos</code>, <code>services/resources/proto_folder</code>.", ["grpc", "mq", "gcssdk"]],
+
+    // RabbitMQ
+    ["fcm-ex", "fcm", "topic exchange", "mq", "FC telemetry from fcm (topic = protobuf class name), plus facade state, <code>SoftwareUpdateStateChanged</code> and <code>FtsVersion</code>. Consumed by emc, drone_facade, drone_periph, software_updater.", ["fcm", "facaderesp", "updatestate", "sustate", "ftsversion", "uavcanver"]],
+    ["altimeter-ex", "altimeter", "fanout exchange", "mq", "<code>AltimeterMeasurementMessage</code> (distance_m), drone_periph to drone_facade, 1 s TTL.", ["drone_periph", "drone_facade", "laserworks"]],
+    ["cellular-ex", "cellular", "fanout exchange", "mq", "<code>CellularMeasurementMessage</code>, drone_periph to emc, 1 s TTL.", ["drone_periph", "emc", "qmi", "c2"]],
+    ["dc-req", "dronecan.requests", "queue", "mq", "<code>DronecanRequest</code> (subscribe / broadcast) from rtk_distributer and emc to dronecan_communicator.", ["dc-ev", "dronecan_communicator", "rtk_distributer"]],
+    ["dc-ev", "dronecan.events", "topic exchange", "mq", "<code>DronecanEvent</code> from dronecan_communicator; routing key = CAN message full name.", ["dc-req", "dronecan_communicator"]],
+    ["facaderesp", "FacadeResponseToServer", "topic", "mq", "drone_facade's reply to a forwarded ground message; emc relays it to the requester.", ["drone_facade", "emc", "fcm-ex"]],
+    ["updatestate", "UpdateMissionComputerState", "UpdateJavaAccordingToFacadeState, UpdateJavaFailureModeAccordingToFacade", "mq", "Facade-to-emc topics that drive emc's mirrored state machine (\"Java\" = emc).", ["emc", "drone_facade", "failuremode"]],
+    ["sustate", "SoftwareUpdateStateChanged", "topic", "mq", "software_updater to drone_facade: <code>IDLE</code>, <code>UPDATING</code> or <code>OUT_OF_SERVICE</code> with a reason.", ["software_updater", "interlock", "updatestates"]],
+    ["ftsversion", "FtsVersion", "topic", "mq", "emc to software_updater: the FTS firmware version, which fcm cannot see.", ["fts", "emc", "software_updater"]],
+    ["uavcanver", "UavcanComponentVersion_*", "topics", "mq", "fcm's per-component versions (fc, bms1/2, fnu1/2, pdb, esc1..8), published once at start. software_updater uses them for the update check.", ["fcm", "software_updater", "component"]],
+
+    // gRPC
+    ["dronefacadeapi", "DroneFacadeAPI", ":50051", "grpc", "Served by drone_facade (<code>DRONE_FACADE_PORT</code>). <code>initialize</code>, <code>report_server_message</code>, failure-mode triggers, heartbeat.", ["drone_facade", "emc"]],
+    ["fcmapi", "FcmAPI", ":50052", "grpc", "Served by fcm (<code>FCM_PORT</code>). Streaming heartbeat, mission upload, params, reboot/kill, ODID, log download.", ["fcm", "drone_facade", "emc"]],
+    ["dronecanfirmware", "DronecanFirmware", ":50053", "grpc", "Served by dronecan_communicator (<code>DRONECAN_GRPC_PORT</code>). <code>GetNodeVersion</code>, <code>UpdateFirmware</code>, <code>SetNodeParam</code>, per CAN bus.", ["dronecan_communicator", "firmware_updater"]],
+    ["droneperiph", "DronePeriph", ":50054", "grpc", "Served by drone_periph. <code>SetLedProperties</code>, <code>GetLedProperties</code>.", ["drone_periph", "led", "firmware_updater"]],
+    ["softwareupdaterapi", "SoftwareUpdaterAPI", ":50055", "grpc", "Served by software_updater (<code>SOFTWARE_UPDATER_PORT</code>). <code>request_mission_start</code>, <code>report_mission_end</code>, <code>report_firmware_device</code>, <code>report_firmware_update_finished</code>.", ["software_updater", "interlock", "firmware_updater"]],
+    ["gcssdk", "GCS SDK services", "DroneAPI, PeripheralsAPI, PackageAPI, RemoteConfigurationAPI", "grpc", "Contracts defined in <code>mc_gcs_sdk/protos</code>, shared with the ground stack.", ["gcs", "proto"]],
+
+    // OTA
+    ["ota", "OTA", "Over-The-Air", "ota", "Software and firmware updates pulled by the aircraft itself, since 3.3.", ["software_updater", "profile", "interlock", "updatestates"]],
+    ["profile", "Profile", "", "ota", "One MC build plus device firmware, assigned by Oversight. Delivered as a zip with <code>content.json</code>, a compose file, an env file and firmware files.", ["ota", "component", "oversight", "sha256"]],
+    ["component", "Component / module", "", "ota", "What is reported to Oversight: <code>mc</code> (all services, one tag) or one firmware device (fc, fts, pdb, bms, fnu, fpc).", ["profile", "uavcanver"]],
+    ["interlock", "Mission interlock", "MissionInterlock, SoftwareUpdateInterlock", "ota", "Missions and updates never overlap. The facade asks before every GCS mission and fails closed after 5 s.", ["software_updater", "drone_facade", "sustate", "softwareupdaterapi"]],
+    ["updatestates", "Update states", "", "ota", "<code>NOT_REQUIRED</code>, <code>IN_PROGRESS</code>, <code>SELF_UPDATE</code>, <code>OUT_OF_SERVICE</code>, kept in <code>/home/mc/software_updater/state.json</code>.", ["selfupdate", "sustate", "software_updater"]],
+    ["selfupdate", "Self update", "self restart", "ota", "software_updater recreates itself on its new image first, so the rest of the update runs on new code. Must resume within 60 s.", ["updatestates", "software_updater"]],
+
+    // Build
+    ["onboard-ng", "onboard-ng", "", "build", "The repo/project name of the Mission Computer software.", ["mc", "onboard-ng-board"]],
+    ["onboard-ng-board", "onboard-ng-board", "", "build", "Compose project name on the aircraft (<code>/opt/mc/docker-compose.board.yml</code>).", ["software_updater", "onboard-ng"]],
+    ["dockerw", "dockerw", "", "build", "Developer shell function (not in the repo) that wraps <code>docker compose</code>.", ["build_target", "system_tests"]],
+    ["build_target", "BUILD_TARGET", "", "build", "Compose build stage: <code>ci</code> (default), <code>local_dev</code>, <code>local_servers</code>.", ["dockerw", "ci", "vscode"]],
+    ["ci", "CI", "Continuous Integration", "build", "Builds one image per service under one tag and registers the compose file in ControlHub.", ["controlhub", "linters"]],
+    ["cdk", "CDK", "AWS Cloud Development Kit", "build", "TypeScript app in <code>deployment/cdk</code> that deploys the Beehive SITL farm.", ["beehive", "aws", "ecs"]],
+    ["aws", "AWS", "Amazon Web Services", "build", "Hosts the cloud SITL farm and S3.", ["cdk", "ecs", "ecr", "s3"]],
+    ["ecs", "ECS", "Elastic Container Service", "build", "AWS container runtime: one task per simulated vehicle.", ["beehive", "aws"]],
+    ["ecr", "ECR", "Elastic Container Registry", "build", "AWS image registry the farm pulls from.", ["aws", "registry"]],
+    ["beehive", "Beehive", "BeehiveDeploymentStack", "build", "Cloud SITL farm: sitl + rabbitmq + fcm + drone-facade + mc per vehicle. Not the physical aircraft.", ["sitl", "cdk", "ecs"]],
+    ["cli", "CLI", "Command-Line Interface", "build", "E.g. the <code>docker compose</code> CLI software_updater drives.", []],
+    ["pid", "PID", "Process ID", "build", "system_config runs with <code>pid: host</code> and enters PID 1's namespaces with <code>nsenter</code>.", ["system_config"]],
+    ["gil", "GIL", "Global Interpreter Lock", "build", "Python lock; why dronecan_communicator runs each bus in its own process.", ["dronecan_communicator"]],
+    ["ap", "AP", "Access Point", "build", "The hostapd Wi-Fi access point for Remote ID.", ["hostapd", "rdid", "system_config"]],
+    ["mmcli", "mmcli", "", "build", "ModemManager command-line tool; system_config uses it to allow every modem band.", ["system_config", "qmi"]],
+    ["hostapd", "hostapd / wpa_supplicant", "", "build", "Linux Wi-Fi access-point and client daemons.", ["ap", "system_config"]],
+    ["rsyslog", "rsyslog / logrotate", "", "build", "Linux logging and log rotation, configured by system_config.", ["system_config"]],
+    ["systemd", "systemd oneshot", "", "build", "Unit type that runs firmware_updater on the native (non-container) install.", ["firmware_updater"]],
+    ["ui", "UI", "User Interface", "build", "E.g. the RabbitMQ management UI (:15672) or emc's <code>ui</code> package.", ["rabbitmq"]],
+    ["vscode", "VS Code", "Visual Studio Code", "build", "Debugging target for <code>BUILD_TARGET=local_dev</code>.", ["build_target"]],
+    ["pr", "PR", "Pull Request", "build", "Lint and test gates run as GitHub PR checks.", ["linters", "ci"]],
+    ["wsl", "WSL", "Windows Subsystem for Linux", "build", "Mentioned for its Zone.Identifier sidecar files.", []],
+    ["tdd", "TDD / YAGNI", "Test-Driven Development / You Aren't Gonna Need It", "build", "Practices referenced in the design plans.", []],
+
+    // Testing
+    ["system_tests", "system_tests", "", "test", "Integration suite: real emc + fcm + drone_facade + rabbitmq + software_updater against ArduPilot SITL, with puppets for the cloud. About 20 min.", ["puppets", "sitl", "dockerw", "fcmock"]],
+    ["puppets", "Puppets", "", "test", "Mock ground services: <code>oversight_puppet</code> (:7700), <code>mission_manager_puppet</code> (:7771), <code>s3_server_puppet</code> (:8003).", ["system_tests", "oversight", "mm", "s3"]],
+    ["fcmock", "FC mock", "", "test", "The system tester's MAVLink flight-controller mock (<code>system_tests/.../mavlink_mocks</code>).", ["system_tests", "guid_options", "sitl"]],
+    ["unit_tests", "unit_tests", "", "test", "emc's Java/Kotlin unit tests, run by Gradle.", ["emc", "linters"]],
+    ["unit_tests_python", "unit_tests_python", "", "test", "Per-service Python tests run with tox inside the container.", ["tox", "linters"]],
+    ["linters", "linters / linters_python", "", "test", "Merge gates: Java/Kotlin (Spotless) and Python (flake8 + pylint + mypy).", ["tox", "pr", "ci"]],
+    ["tox", "tox", "", "test", "Python test and virtualenv runner.", ["unit_tests_python", "linters"]],
+];
+
+const byId = new Map(E.map(e => [e[0], e]));
+const main = document.getElementById("main");
+const chips = document.getElementById("chips");
+const q = document.getElementById("q");
+const countEl = document.getElementById("count");
+const emptyEl = document.getElementById("empty");
+
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]));
+const plain = html => html.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&");
+
+// Precomputed search text per entry
+const hay = new Map(E.map(e => [e[0], (e[1] + " " + e[2] + " " + plain(e[4])).toLowerCase()]));
+
+function highlight(html, term) {
+    if (!term) return html;
+    const re = new RegExp("(" + term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi");
+    // Only replace inside text nodes, not inside tags
+    return html.split(/(<[^>]+>)/).map(p => p.startsWith("<") ? p : p.replace(re, "<mark>$1</mark>")).join("");
+}
+
+function render(term) {
+    const t = term.trim().toLowerCase();
+    let total = 0;
+    const out = [];
+    const chipOut = [];
+    SECTIONS.forEach(([sid, title], i) => {
+        const items = E.filter(e => e[3] === sid && (!t || hay.get(e[0]).includes(t)));
+        if (!items.length) return;
+        total += items.length;
+        chipOut.push(`<a href="#s-${sid}">${esc(title)}<span class="n">${items.length}</span></a>`);
+        out.push(`<section class="group" id="s-${sid}"><h2 class="label"><span class="num">${String(i + 1).padStart(2, "0")}</span>${esc(title)}</h2><div class="entries">` +
+            items.map(e => {
+                const [id, name, aka, , desc, rel, flag] = e;
+                const relLinks = rel.filter(r => byId.has(r)).map(r => `<a href="#t-${r}">${esc(byId.get(r)[1])}</a>`).join("");
+                return `<article class="entry" id="t-${id}">
+                    <div class="term">${highlight(esc(name), t)}${aka ? `<span class="aka">${highlight(esc(aka), t)}</span>` : ""}</div>
+                    <div class="body"><p class="desc">${highlight(desc, t)}${flag ? `<span class="flag">not expanded in docs</span>` : ""}</p>
+                    ${relLinks ? `<div class="rel"><span>Related</span>${relLinks}</div>` : ""}</div>
+                </article>`;
+            }).join("") + `</div></section>`);
+    });
+    main.innerHTML = out.join("");
+    chips.innerHTML = chipOut.join("");
+    emptyEl.hidden = total > 0;
+    countEl.textContent = t ? `${total} of ${E.length} terms match` : `${E.length} terms`;
+}
+
+function jumpTo(hash) {
+    const id = hash.replace(/^#/, "");
+    if (!id) return;
+    let el = document.getElementById(id);
+    if (!el && q.value) { q.value = ""; render(""); el = document.getElementById(id); }
+    if (!el) return;
+    const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+    if (el.classList.contains("entry")) {
+        el.classList.add("flash");
+        setTimeout(() => el.classList.remove("flash"), 900);
+    }
+}
+
+main.addEventListener("click", ev => {
+    const a = ev.target.closest(".rel a");
+    if (!a) return;
+    ev.preventDefault();
+    const h = a.getAttribute("href");
+    try { history.replaceState(null, "", h); } catch (e) { /* ignore */ }
+    jumpTo(h);
+});
+window.addEventListener("hashchange", () => jumpTo(location.hash));
+q.addEventListener("input", () => render(q.value));
+document.addEventListener("keydown", ev => {
+    if (ev.key === "/" && document.activeElement !== q) { ev.preventDefault(); q.focus(); q.select(); }
+    if (ev.key === "Escape" && document.activeElement === q) { q.value = ""; render(""); }
+});
+
+render("");
+if (location.hash) jumpTo(location.hash);
+</script>
+</body>
+</html>

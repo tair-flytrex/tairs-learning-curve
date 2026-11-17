@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What is the initializing state (emc and GCS) and what other states are there for this type?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-17</div>
+        <h1 class="question">What is the initializing state (emc and GCS) and what other states are there for this type?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-missions">Missions</a><a class="tag" href="../qa.html#topic-services">Services</a><a class="tag" href="../qa.html#topic-messaging">Messaging</a></div>
+    </header>
+    <main class="answer">
+<p><strong>What INITIALIZING is</strong></p>
+<p>It's the first value of the <a class="g" href="../glossary.html#t-mcstate">mission computer state</a> that <a class="g" href="../glossary.html#t-emc">emc</a> reports to the <a class="g" href="../glossary.html#t-gcs">GCS</a>: "initializing, not yet ready to receive a mission". emc sends the state to <a class="g" href="../glossary.html#t-mm">Mission Manager</a> as an <code>onboard_state</code> message (<code>{"state_type": "initializing", "until", "failure_mode", "problems"}</code>). The GCS uses it to know what the drone is doing and whether it can accept a mission.</p>
+<p>The same list of states is defined in three places:</p>
+<ul>
+<li><code>app/.../server/messages/uplink/MissionComputerState.kt</code>: <code>StateType.INITIALIZING("initializing")</code>. What emc sends to the GCS (JSON string value).</li>
+<li><code>services/drone_facade/internal_sdk/protos/drone_facade.proto</code>: <code>MISSION_COMPUTER_STATE_INITIALIZING = 1</code>. What <a class="g" href="../glossary.html#t-drone_facade">drone_facade</a> sends to emc in <a class="g" href="../glossary.html#t-updatestate">UpdateMissionComputerState</a> on the <code>fcm</code> exchange.</li>
+<li><code>system_tests/system_tests/mm_schemas.py</code>: <code>MissionComputerStateType.INITIALIZING</code>. The Mission Manager <a class="g" href="../glossary.html#t-puppets">puppet</a>'s copy, for tests.</li>
+</ul>
+<p><strong>When the drone is INITIALIZING</strong></p>
+<ul>
+<li><strong>At emc startup.</strong> <code>MissionComputer.triggerSettingsUpdate()</code> reports INITIALIZING, then imports settings from <a class="g" href="../glossary.html#t-oversight">Oversight</a> and retries until that works.</li>
+<li><strong>After a mission ends or fails fatally.</strong> emc tears down its devices and mission logic and runs the same settings update, so the drone is INITIALIZING again until it's ready.</li>
+<li><strong>While setup keeps failing.</strong> If devices or mission logic fail to come up (<code>initDevicesAndLogic</code>), emc retries after a delay. Meanwhile the drone stays INITIALIZING and <code>droneError</code> holds the reason.</li>
+<li><strong>When the aircraft is out of service after a failed <a class="g" href="../glossary.html#t-ota">OTA</a> update.</strong> drone_facade sends <code>MISSION_COMPUTER_STATE_OUT_OF_SERVICE</code>. The GCS has no matching state yet, so emc sets <code>SystemState.outOfService</code>, reports the error "Out of service", and maps the state to INITIALIZING (there's a TODO in <code>NewMissionLogic.java</code> for a dedicated state).</li>
+</ul>
+<p>It ends when the mission logic starts: <code>NewMissionLogic.start()</code> moves straight to <code>IdleState</code>, and the drone reports <strong>IDLE</strong>. Inside emc's own state machine, <code>InitialState</code> is just a placeholder named INITIALIZING that exists until the logic starts.</p>
+<p><strong>All the states of this type</strong> (33 for the GCS; the facade proto also has UNSPECIFIED and OUT_OF_SERVICE):</p>
+<ul>
+<li><strong>On the ground:</strong> <code>initializing</code> (starting up, not ready for a mission), <code>idle</code> (waiting for a mission), <code>preflight</code> (has a mission, before takeoff), <code>postflight</code> (mission finished, post-flight tasks).</li>
+<li><strong>Takeoff and flight:</strong> <code>taking_off</code>, <code>inflight_to_dest</code> (flying to the delivery point), <code>inflight_to_pickup</code>, <code>inflight_to_dock</code>, <code>inflight_home</code>, <code>landing_home</code>.</li>
+<li><strong>Delivery (wire drop):</strong> <code>waiting_wiredrop</code> (waiting for confirmation to lower the package), <code>performing_wiredrop</code>.</li>
+<li><strong>Pickup:</strong> <code>preparing_for_pickup</code> (lowering the hook), <code>waiting_for_package_loaded_confirmation</code>, <code>lifting_package</code>, <code>wait_for_door_closure</code>.</li>
+<li><strong><a class="g" href="../glossary.html#t-dock">Dock</a>:</strong> <code>waiting_on_dock</code>, <code>taking_off_from_dock</code>, <code>landing_on_dock</code>, <code>picking_up_from_dock</code>.</li>
+<li><strong><a class="g" href="../glossary.html#t-safeup">Safe-up</a>:</strong> <code>safing_up</code>, <code>safing_up_to_land</code>, <code>safed_up</code> (hovering at a safe altitude at the nearest semaphore).</li>
+<li><strong>Abort and emergency:</strong> <code>abort_home</code>, <code>abort_home_landing</code>, <code>emergency_landing</code>.</li>
+<li><strong><a class="g" href="../glossary.html#t-daa">DAA</a> (Detect And Avoid):</strong> <code>descending</code> (in the DAA descent), <code>descended</code> (descent finished, hovering).</li>
+<li><strong>Off-nominal:</strong> <code>rc_in_control</code> (the pilot took over with the <a class="g" href="../glossary.html#t-rc">remote control</a>), <code>executing_fallback_mission</code> (the <a class="g" href="../glossary.html#t-fc">FC</a> took over), <code>fc_loss</code> (lost the link to the FC), <code>parachute_triggered</code>.</li>
+<li><strong>Facade proto only, never sent to the GCS:</strong> <code>UNSPECIFIED</code> (protobuf default), <code>OUT_OF_SERVICE</code> (reported to the GCS as <code>initializing</code>).</li>
+</ul>
+<p>Since the move to drone_facade, the facade decides most of these states and emc only passes them on. INITIALIZING is the main one emc still sets by itself (the first three cases above).</p>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>

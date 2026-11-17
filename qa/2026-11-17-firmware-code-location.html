@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Is the code for firmware in this repo or a different one?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-17</div>
+        <h1 class="question">Is the code for firmware in this repo or a different one?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-ota-firmware">OTA &amp; firmware</a><a class="tag" href="../qa.html#topic-repo-tooling">Repo &amp; tooling</a></div>
+    </header>
+    <main class="answer">
+<p>Both, depending on what you mean. The code that installs firmware onto the devices is in this repo. The firmware itself is built somewhere else.</p>
+<p><strong>In this repo: the code that installs firmware on the aircraft (the <a class="g" href="../glossary.html#t-ota">OTA</a> update pipeline)</strong></p>
+<ul>
+<li><a class="g" href="../glossary.html#t-firmware_updater">firmware_updater</a> flashes the <a class="g" href="../glossary.html#t-fc">FC</a> and <a class="g" href="../glossary.html#t-fts">FTS</a> over USB serial using <a class="g" href="../glossary.html#t-mavlink">MAVLink</a> and the ArduPilot bootloader. It asks dronecan_communicator to flash the <a class="g" href="../glossary.html#t-bms">BMS</a>, <a class="g" href="../glossary.html#t-fnu">FNU</a> and <a class="g" href="../glossary.html#t-fpc">FPC</a>.</li>
+<li><a class="g" href="../glossary.html#t-dronecan_communicator">dronecan_communicator</a> sends firmware files to the CAN devices over <a class="g" href="../glossary.html#t-dronecan">DroneCAN</a> (<code>firmware_update_service.py</code>).</li>
+<li><a class="g" href="../glossary.html#t-software_updater">software_updater</a> downloads the firmware files in a <a class="g" href="../glossary.html#t-profile">profile</a>, writes firmware_updater's <code>config.yaml</code>, and reads the device versions back off the bus (<code>firmware_manager.py</code>, <code>firmware_versions.py</code>).</li>
+<li>The <code>add-firmware-device</code> skill walks through adding a new device to this pipeline.</li>
+</ul>
+<p><strong>Not in this repo: the device firmware itself</strong></p>
+<ul>
+<li>The repo has no firmware source code and no firmware binaries (<a class="g" href="../glossary.html#t-apj">.apj</a>, <code>.bin</code>).</li>
+<li>The firmware files arrive at update time inside the profile zip that <a class="g" href="../glossary.html#t-oversight">Oversight</a> assigns, and they're flashed as finished builds.</li>
+<li>The <code>ardupilot_mavlink</code> submodule is only the MAVLink message definitions and the pymavlink library, not ArduPilot firmware.</li>
+<li>The docs don't say which repos the FC, FTS, BMS, FNU and FPC firmware are built from.</li>
+</ul>
+<p>The first install on a fresh board also comes from elsewhere: CLAUDE.md lists a separate <code>emc_controller</code> repo as the installer that copies firmware files and config to the board over SSH.</p>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>

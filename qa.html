@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Computer Q&amp;A</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+/* Q&A list only: search, topic filter, question cards. Shared styles are in style.css */
+.bar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+    background: var(--bg); padding-block: 14px 10px; border-bottom: 1px solid var(--line);
+}
+.bar input {
+    width: 100%; font: inherit; color: var(--fg);
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 11px 14px;
+}
+.bar input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.bar .tag { font-size: 15px; padding: 2px 11px; }
+.tag .n { font-family: var(--font-mono); font-size: 13px; opacity: 0.75; margin-left: 4px; }
+.meta { margin-top: 8px; font-size: 16px; color: var(--muted); }
+main { padding-block: 20px 64px; display: grid; gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; }
+.card:hover { border-color: var(--accent); }
+.card h2 { font-size: 22px; line-height: 1.35; margin: 0; font-weight: 600; text-wrap: balance; }
+.card h2 a { color: inherit; text-decoration: none; }
+.card h2 a:hover, .card h2 a:focus-visible { color: var(--accent); outline: none; }
+.card .summary { color: var(--muted); margin: 8px 0 0; }
+.card .foot { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 12px; font-size: 15px; color: var(--muted); }
+.card .more { margin-left: auto; color: var(--accent); text-decoration: none; font-size: 16px; }
+.card .more:hover, .card .more:focus-visible { text-decoration: underline; outline: none; }
+.empty { text-align: center; color: var(--muted); padding: 48px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="index.html">&larr; Tair's Learning Curve</a>
+        <div class="eyebrow">onboard-ng · notes</div>
+        <h1>Mission Computer Q&amp;A</h1>
+        <p>Questions I asked about the project. Open a question to read the full answer.</p>
+    </header>
+    <div class="bar">
+        <input id="q" type="search" placeholder="Search questions" autocomplete="off" aria-label="Search questions">
+        <div class="tag-row" id="tags" aria-label="Filter by topic"></div>
+        <div class="meta" id="count"></div>
+    </div>
+    <main id="main"></main>
+    <div class="empty" id="empty" hidden>No questions match.</div>
+    <footer>Each answer is its own page in the <code>qa/</code> folder.</footer>
+</div>
+
+<script>
+// One row per question, newest first. The full answer lives in the file named by `file`.
+// Topics in use: Architecture, Services, OTA & firmware, Hardware, Messaging, Repo & tooling, Testing, Missions
+const QA = [
+    {
+        file: "qa/2026-11-17-initializing-state.html",
+        date: "2026-11-17",
+        q: "What is the initializing state (emc and GCS) and what other states are there for this type?",
+        tags: ["Missions", "Services", "Messaging"],
+        summary: "INITIALIZING is the first mission computer state emc reports to the GCS: starting up and not ready for a mission. The answer covers when it's set, how it ends, and lists all 33 states by group.",
+    },
+    {
+        file: "qa/2026-11-17-firmware-code-location.html",
+        date: "2026-11-17",
+        q: "Is the code for firmware in this repo or a different one?",
+        tags: ["OTA & firmware", "Repo & tooling"],
+        summary: "The code that installs firmware on the aircraft (firmware_updater, dronecan_communicator, software_updater) is in this repo. The firmware itself isn't: it arrives as finished builds inside the OTA profile.",
+    },
+];
+
+const main = document.getElementById("main");
+const tagsEl = document.getElementById("tags");
+const q = document.getElementById("q");
+const countEl = document.getElementById("count");
+const emptyEl = document.getElementById("empty");
+
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]));
+// Topic slug, also used in links from the question pages: qa.html#topic-<slug>
+const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const allTags = [...new Set(QA.flatMap(x => x.tags))].sort();
+let activeTag = null;
+
+function tagFromHash() {
+    const m = location.hash.match(/^#topic-(.+)$/);
+    activeTag = m ? (allTags.find(t => slug(t) === m[1]) || null) : null;
+}
+
+function setTag(tag) {
+    activeTag = tag;
+    try { history.replaceState(null, "", tag ? "#topic-" + slug(tag) : location.pathname); } catch (e) { /* ignore */ }
+    render();
+}
+
+function render() {
+    const t = q.value.trim().toLowerCase();
+    const shown = QA.filter(x =>
+        (!activeTag || x.tags.includes(activeTag)) &&
+        (!t || (x.q + " " + x.summary + " " + x.tags.join(" ")).toLowerCase().includes(t)));
+    tagsEl.innerHTML = [`<button class="tag" data-tag="" aria-pressed="${!activeTag}">All<span class="n">${QA.length}</span></button>`]
+        .concat(allTags.map(tag => `<button class="tag" data-tag="${esc(tag)}" aria-pressed="${activeTag === tag}">${esc(tag)}<span class="n">${QA.filter(x => x.tags.includes(tag)).length}</span></button>`))
+        .join("");
+    main.innerHTML = shown.map(x => `
+        <article class="card">
+            <h2><a href="${esc(x.file)}">${esc(x.q)}</a></h2>
+            <p class="summary">${esc(x.summary)}</p>
+            <div class="foot"><span>${esc(x.date)}</span>${x.tags.map(tag => `<button class="tag" data-tag="${esc(tag)}" aria-pressed="${activeTag === tag}">${esc(tag)}</button>`).join("")}<a class="more" href="${esc(x.file)}">Full answer &rarr;</a></div>
+        </article>`).join("");
+    emptyEl.hidden = shown.length > 0;
+    countEl.textContent = shown.length === QA.length ? `${QA.length} questions` : `${shown.length} of ${QA.length} questions`;
+}
+
+document.addEventListener("click", ev => {
+    const b = ev.target.closest("button.tag");
+    if (!b) return;
+    const tag = b.dataset.tag || null;
+    setTag(activeTag === tag ? null : tag);
+});
+q.addEventListener("input", render);
+window.addEventListener("hashchange", () => { tagFromHash(); render(); });
+tagFromHash();
+render();
+</script>
+</body>
+</html>
