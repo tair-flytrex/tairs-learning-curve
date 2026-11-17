@@ -58,6 +58,13 @@ main { padding-block: 20px 64px; display: grid; gap: 14px; }
 // Topics in use: Architecture, Services, OTA & firmware, Hardware, Messaging, Repo & tooling, Testing, Missions
 const QA = [
     {
+        file: "qa/2026-11-17-version-reporting.html",
+        date: "2026-11-17",
+        q: "What prompts the version reporting? Is it each module by itself or the software updater?",
+        tags: ["OTA & firmware", "Messaging", "Services"],
+        summary: "Each module sends its own version once at startup: fcm for the FC and CAN devices, emc for the FTS. software_updater only listens, waits for the versions to settle, and reports them to Oversight.",
+    },
+    {
         file: "qa/2026-11-17-initializing-state.html",
         date: "2026-11-17",
         q: "What is the initializing state (emc and GCS) and what other states are there for this type?",

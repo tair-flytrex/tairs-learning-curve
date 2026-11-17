@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What prompts the version reporting? Is it each module by itself or the software updater?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-17</div>
+        <h1 class="question">What prompts the version reporting? Is it each module by itself or the software updater?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-ota-firmware">OTA &amp; firmware</a><a class="tag" href="../qa.html#topic-messaging">Messaging</a><a class="tag" href="../qa.html#topic-services">Services</a></div>
+    </header>
+    <main class="answer">
+<p>Each module sends its own version, and only once, when it starts up. <a class="g" href="../glossary.html#t-software_updater">software_updater</a> never asks for versions. It just listens, collects them, and sends them to <a class="g" href="../glossary.html#t-oversight">Oversight</a> when it checks for an update.</p>
+<p><strong>Who sends what, and when</strong></p>
+<ul>
+<li><strong><a class="g" href="../glossary.html#t-fc">FC</a>, <a class="g" href="../glossary.html#t-fnu">FNU</a>, <a class="g" href="../glossary.html#t-bms">BMS</a>, <a class="g" href="../glossary.html#t-pdb">PDB</a>, <a class="g" href="../glossary.html#t-esc">ESC</a> (the CAN devices):</strong> sent by <a class="g" href="../glossary.html#t-fcm">fcm</a> as <a class="g" href="../glossary.html#t-uavcanver">UavcanComponentVersion_*</a> topics on the <a class="g" href="../glossary.html#t-fcm-ex">fcm exchange</a>, when fcm connects to the FC. In <code>ardupilot_fc_commander.py</code>, <code>_request_mavlink_messages_on_initialization</code> asks the FC once (over <a class="g" href="../glossary.html#t-mavlink">MAVLink</a>) for <code>AUTOPILOT_VERSION</code> (the FC's own version) and <code>UAVCAN_NODE_INFO</code> (one reply per CAN node). Each reply is converted to protobuf and published as its own topic (<code>UavcanNodeInfoToComponentVersion</code>).</li>
+<li><strong><a class="g" href="../glossary.html#t-fts">FTS</a>:</strong> sent by <a class="g" href="../glossary.html#t-emc">emc</a> as the <a class="g" href="../glossary.html#t-ftsversion">FtsVersion</a> topic, when emc finishes setting up its devices (<code>initDevicesAndLogic</code> → <code>updateVehicleModuleVersions</code> → <code>publishFtsVersion</code>). The FTS isn't on the CAN bus, so emc is the only process that can read its version.</li>
+<li><strong>MC (the software):</strong> nobody sends it. software_updater reads it itself: it's the image tag of <code>drone_facade</code> in the installed compose file.</li>
+</ul>
+<p><strong>What software_updater does</strong></p>
+<ul>
+<li><strong>Subscribes first.</strong> It subscribes to every version topic (<code>FirmwareVersionListener</code>) before it starts the other containers. That matters because the versions are sent only once and aren't replayed; if it subscribed late, it would miss them.</li>
+<li><strong>Waits for the versions to settle.</strong> CAN nodes answer at different times, so it waits at least 60 s, then until no version has changed for 60 s, and never more than 600 s (<code>_are_device_versions_settled</code> in <code>main.py</code>).</li>
+<li><strong>Reports.</strong> It sends the collected list in the update check: <code>[{"module": "fc", "version": ...}, ..., {"module": "mc", ...}]</code>.</li>
+<li><strong>Gets fresh versions after a change.</strong> Whenever it restarts the services (after an update, or once when the aircraft is out of service), it clears what it collected. fcm and emc start again and send their versions again.</li>
+</ul>
+<p><strong>A separate report to the GCS</strong></p>
+<p>emc also sends a version list to <a class="g" href="../glossary.html#t-mm">Mission Manager</a>, independently of the update flow. In the same startup step, <code>updateVehicleModuleVersions()</code> gathers the fcm versions it has received, plus the FTS and delivery device (<a class="g" href="../glossary.html#t-vesc">VESC</a>) versions, and sends them over the ground link (<code>server.updateVehicleModuleVersions</code>). This also happens only at startup, when emc sets itself up again.</p>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>
