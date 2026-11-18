@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>In the fcm exchange there are FC telemetry as well as responses from the facade to GCS? Are there any more message types there or is that all?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-18</div>
+        <h1 class="question">In the fcm exchange there are FC telemetry as well as responses from the facade to GCS? Are there any more message types there or is that all?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-messaging">Messaging</a><a class="tag" href="../qa.html#topic-architecture">Architecture</a></div>
+    </header>
+    <main class="answer">
+<p>No, telemetry and facade responses aren't everything. The <a class="g" href="../glossary.html#t-fcm-ex">fcm exchange</a> is a topic exchange that carries four groups of messages. It's really the shared bus for state between processes: four services publish to it (fcm, drone_facade, emc and software_updater).</p>
+<p><strong>1. FC telemetry (published by <a class="g" href="../glossary.html#t-fcm">fcm</a>)</strong></p>
+<p>The routing key is the protobuf class name: <code>FcHeartbeat</code>, <code>AerialStateChanged</code>, <code>GlobalPosition</code>, <code>LaunchPosition</code>, <code>AttitudeAndRotationRates</code>, <code>Imu</code>, <code>Barometer</code>, <code>Vibration</code>, <code>GpsRaw</code>, <code>EkfStatusFlags</code>, <code>SystemStatus</code>, <code>ComponentsHealth</code>, <code>TextMessage</code>, <code>WaypointReached</code>, and the per-index <code>BatteryStatus_N</code>, <code>SmartBatteryStatus_N</code> and <code>SmartBatteryInfo_N</code>. Some of these aren't really flight telemetry:</p>
+<ul>
+<li><a class="g" href="../glossary.html#t-uavcanver">UavcanComponentVersion_*</a>: firmware versions for <code>fc</code>, <code>bms1/2</code>, <code>fnu1/2</code>, <code>pdb</code> and <code>esc1..8</code>. software_updater reads these too.</li>
+<li><code>OpenDroneIdPublishedMessagePack</code>: <a class="g" href="../glossary.html#t-odid">Remote ID</a>.</li>
+<li><code>FcLogDownloadProgress</code></li>
+<li><code>VeerOffPathStatus</code></li>
+<li><code>AdsbVehicle</code> and <code>AdsbCollision</code></li>
+</ul>
+<p><strong>2. <a class="g" href="../glossary.html#t-drone_facade">drone_facade</a> state toward <a class="g" href="../glossary.html#t-emc">emc</a></strong></p>
+<p><a class="g" href="../glossary.html#t-facaderesp">FacadeResponseToServer</a> (the replies to ground requests) is only one of these. The others (<code>drone_facade_config.py</code>):</p>
+<ul>
+<li><code>UpdateMissionComputerState</code>, <code>UpdateJavaAccordingToFacadeState</code>, <code>UpdateJavaFailureModeAccordingToFacade</code></li>
+<li><code>FacadeStoppedPosition</code>, <code>FacadeTextMessage</code>, <code>FacadeTakeoffProhibitionReason</code></li>
+<li><code>safeUpOriginNodeId</code>, <code>fcLossOriginNodeId</code>, <code>facadeUpdateSafedUpDelay</code></li>
+</ul>
+<p><strong>3. OTA update messages</strong></p>
+<ul>
+<li><a class="g" href="../glossary.html#t-sustate">SoftwareUpdateStateChanged</a>: <a class="g" href="../glossary.html#t-software_updater">software_updater</a> → drone_facade (<code>IDLE</code> / <code>UPDATING</code> / <code>OUT_OF_SERVICE</code>).</li>
+<li><a class="g" href="../glossary.html#t-ftsversion">FtsVersion</a>: emc → software_updater. This is the only thing emc publishes on this exchange.</li>
+</ul>
+<p><strong>4. Other consumers</strong></p>
+<p><a class="g" href="../glossary.html#t-drone_periph">drone_periph</a> subscribes to <code>AerialStateChanged</code>, for flight-end detection and fan control.</p>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>

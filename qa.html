@@ -58,6 +58,27 @@ main { padding-block: 20px 64px; display: grid; gap: 14px; }
 // Topics in use: Architecture, Services, OTA & firmware, Hardware, Messaging, Repo & tooling, Testing, Missions
 const QA = [
     {
+        file: "qa/2026-11-18-dronefacadeapi-clients.html",
+        date: "2026-11-18",
+        q: "Who accesses DroneFacadeAPI?",
+        tags: ["Messaging", "Services"],
+        summary: "Only emc, through DroneFacadeCommunicator.java: initialize, report_server_message, the heartbeat stream, failure-mode and non-navigation triggers, takeoff prohibition reasons, custom_command and get_altimeter_measurement. The facade replies on the fcm exchange.",
+    },
+    {
+        file: "qa/2026-11-18-fcm-exchange-topics.html",
+        date: "2026-11-18",
+        q: "In the fcm exchange there are FC telemetry as well as responses from the facade to GCS? Are there any more message types there or is that all?",
+        tags: ["Messaging", "Architecture"],
+        summary: "Four groups: FC telemetry from fcm (incl. component versions, Remote ID, ADS-B), facade state to emc (FacadeResponseToServer is one of ten topics), OTA messages (SoftwareUpdateStateChanged, FtsVersion), and drone_periph listening to AerialStateChanged.",
+    },
+    {
+        file: "qa/2026-11-17-cellular-modem-handling.html",
+        date: "2026-11-17",
+        q: "What do the cellular messages contain, and in general how is the cellular periph handled?",
+        tags: ["Hardware", "Messaging", "Services"],
+        summary: "drone_periph polls the modem over QMI every 500 ms and publishes the serving cell's band, channel, cell ID and signal values. emc logs them in the C2 log. An optional emc poller uses mmcli for IMEI, operator and SIM.",
+    },
+    {
         file: "qa/2026-11-17-version-reporting.html",
         date: "2026-11-17",
         q: "What prompts the version reporting? Is it each module by itself or the software updater?",

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Who accesses DroneFacadeAPI?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-18</div>
+        <h1 class="question">Who accesses DroneFacadeAPI?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-messaging">Messaging</a><a class="tag" href="../qa.html#topic-services">Services</a></div>
+    </header>
+    <main class="answer">
+<p>Only <a class="g" href="../glossary.html#t-emc">emc</a> calls <a class="g" href="../glossary.html#t-dronefacadeapi">DroneFacadeAPI</a>. Its one client is <code>DroneFacadeCommunicator.java</code>. No Python service, test or puppet opens a stub to port 50051. The other hits in the repo are the server itself (<code>drone_facade/main.py</code>, <code>grpc_services/drone_facade_api_service.py</code>) and the BlackBox log viewer, which only parses log text.</p>
+<p><strong>What emc calls, and from where</strong></p>
+<ul>
+<li><code>initialize</code> (10 s deadline): emc startup; sends runtime config to the facade.</li>
+<li><code>report_server_message</code>: <code>MissionServer</code> forwards every ground message (wired up at <code>MissionComputer.java:878</code>).</li>
+<li><code>heartbeat</code> (client stream): <code>NewMissionLogic.java:416</code>.</li>
+<li><code>trigger_non_navigation_state</code>: <code>NewMissionLogic</code> (several places).</li>
+<li><code>trigger_inflight_failure_mode</code>: <code>NewMissionLogic</code> (many places).</li>
+<li><code>report_takeoff_prohibition_reasons</code>: <code>NewMissionLogic</code> (around lines 3064–3340).</li>
+<li><code>custom_command</code> and <code>get_altimeter_measurement</code> (500 ms deadline): defined in <code>DroneFacadeCommunicator.java</code>; callers not traced.</li>
+</ul>
+<p><strong>The other direction</strong></p>
+<p>Traffic back to emc doesn't use <a class="g" href="../glossary.html#t-grpc">gRPC</a>. The facade answers asynchronously on the <a class="g" href="../glossary.html#t-fcm-ex">fcm exchange</a>, with topics such as <a class="g" href="../glossary.html#t-facaderesp">FacadeResponseToServer</a>. The facade is also a gRPC <em>client</em> of fcm (<a class="g" href="../glossary.html#t-fcmapi">FcmAPI</a>) and software_updater (<a class="g" href="../glossary.html#t-softwareupdaterapi">SoftwareUpdaterAPI</a>), but nothing calls into it except emc.</p>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>

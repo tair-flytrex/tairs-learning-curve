@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What do the cellular messages contain, and in general how is the cellular periph handled?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-17</div>
+        <h1 class="question">What do the cellular messages contain, and in general how is the cellular periph handled?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-hardware">Hardware</a><a class="tag" href="../qa.html#topic-messaging">Messaging</a><a class="tag" href="../qa.html#topic-services">Services</a></div>
+    </header>
+    <main class="answer">
+<p>Two separate paths read the modem. <a class="g" href="../glossary.html#t-drone_periph">drone_periph</a> polls the radio measurements every 500 ms and publishes them over RabbitMQ. <a class="g" href="../glossary.html#t-emc">emc</a> uses them only for the <a class="g" href="../glossary.html#t-c2">C2</a> log. emc also has an older, optional poller of its own that reads general modem info with <a class="g" href="../glossary.html#t-mmcli">mmcli</a>.</p>
+<p><strong>The message: <code>CellularMeasurementMessage</code></strong></p>
+<p>Defined in <code>services/drone_periph/internal_sdk/protos/drone_periph_messages.proto</code>. Each message is one poll, and covers the serving cell only. A field the modem didn't report is left unset.</p>
+<ul>
+<li><code>access_technology</code>: NONE (no service), GSM, UMTS or LTE.</li>
+<li><code>band</code>: the LTE band number, e.g. 66.</li>
+<li><code>earfcn</code>: the downlink channel number. It can go above 65535.</li>
+<li><code>pci</code>: the physical cell ID, 0-503.</li>
+<li><code>bandwidth_mhz</code>: the cell's bandwidth.</li>
+<li>Signal:
+<ul>
+<li><code>rsrp_dbm</code>: received signal power.</li>
+<li><code>rsrq_db</code>: received signal quality.</li>
+<li><code>rssi_dbm</code>: total received power.</li>
+<li><code>sinr_db</code>: signal-to-noise ratio.</li>
+</ul></li>
+<li><code>mcc</code>, <code>mnc</code>: the network's country and operator codes. They are strings so that leading zeros are kept ("01" and "001" are different networks).</li>
+<li><code>sim_slot</code>: always 1, because there is a single SIM.</li>
+</ul>
+<p>When the modem isn't on LTE, the message has only the access technology, the RSSI and the MCC/MNC. The LTE cell values could be left over from earlier, so they aren't sent.</p>
+<p><strong>drone_periph: reading the modem</strong></p>
+<ul>
+<li><strong>How it reads the modem:</strong> <code>QmiModemClient</code> (<code>qmi_modem_client.py</code>) talks <a class="g" href="../glossary.html#t-qmi">QMI</a> to <code>/dev/cdc-wdm0</code> through <code>qmi-proxy</code>, using libqmi's Python bindings.
+<ul>
+<li>It needs root, because <code>qmi-proxy</code> only accepts root.</li>
+<li>If the bindings are missing, it logs a warning and skips modem polling. The altimeter keeps working.</li>
+</ul></li>
+<li><strong>Each poll (every 500 ms):</strong> it sends six QMI requests in parallel, each with a 1 s timeout:
+<ul>
+<li>signal info</li>
+<li>RF band</li>
+<li>cell location</li>
+<li>carrier aggregation (CA) info</li>
+<li>serving system</li>
+<li>Sierra Wireless's own status report</li>
+</ul></li>
+<li><strong>Parsing:</strong> <code>QmiResponseParser</code> copies the plain values out of each reply.</li>
+<li><strong>Choosing a source for each value</strong> (<code>_build_measurement</code>). Each value comes from the source that is most reliable for it, with a fallback:
+<ul>
+<li>RSRP, RSRQ and RSSI: from cell location, which is measured every poll. The fallback is signal info, which the modem refreshes only about every 3 s.</li>
+<li>SINR: from signal info only.</li>
+<li>PCI: from cell location, falling back to CA info.</li>
+<li>Band and EARFCN: from the RF band report. The other reports carry a 16-bit channel number, which is wrong for bands like 66 and 71.</li>
+<li>Bandwidth: from CA info, falling back to the Sierra status. CA info has nothing until the first carrier aggregation event after boot. When both sources have a bandwidth and they disagree, it logs a warning.</li>
+</ul></li>
+<li><strong>Robustness:</strong>
+<ul>
+<li>If the modem stops answering several polls in a row, it reconnects. A failed connection is retried every 5 s.</li>
+<li>An enum value libqmi has no name for, such as a band newer than libqmi, is treated as missing, because reading its name would crash Python. It is logged and counted.</li>
+</ul></li>
+<li><strong>Flight summary:</strong> <code>FlightEndListener</code> subscribes to fcm's <code>AerialStateChanged</code>. On landing, drone_periph logs one summary line covering:
+<ul>
+<li>how often each fallback was used</li>
+<li>how often the two bandwidth sources disagreed</li>
+<li>which unknown values were seen</li>
+</ul></li>
+<li><strong>Publishing:</strong> <code>CellularPublisher</code> publishes on the <a class="g" href="../glossary.html#t-cellular-ex">cellular</a> fanout exchange with a 1 s <a class="g" href="../glossary.html#t-ttl">TTL</a>.
+<ul>
+<li>It has its own pika connection, separate from the altimeter's, because pika isn't thread-safe.</li>
+<li>Measurements sent while RabbitMQ is down are dropped.</li>
+</ul></li>
+</ul>
+<p><strong>emc: using the measurements</strong></p>
+<ul>
+<li><strong>Receiving:</strong> <code>CellularCommunicator</code> (<code>accessories/cellular/</code>) subscribes to the <code>cellular</code> exchange and keeps only the latest measurement. <code>Devices</code> creates it with the other devices.</li>
+<li><strong>Logging:</strong> <code>C2Logger</code> runs from the moment a mission is accepted until it ends. Every 500 ms it writes a <code>c2</code> sample into the mission's <a class="g" href="../glossary.html#t-slog">SLog</a>, containing:
+<ul>
+<li>position and attitude from fcm</li>
+<li>the latest cellular measurement: <code>rat</code>, <code>cell_type</code>, band, EARFCN, PCI, bandwidth, signal values, MCC/MNC and SIM slot</li>
+<li>when each part was received</li>
+</ul>
+Once per mission it also writes a header with the modem model and firmware.</li>
+<li><strong>Who sees it:</strong> the measurements aren't sent to the GCS live. They only reach the C2 log, which is uploaded with the mission logs.</li>
+</ul>
+<p><strong>emc's own modem poller (optional)</strong></p>
+<p><code>CellularInfoPoller</code> (<code>logic/</code>) is used only when the <code>use_cellular_info_poller</code> setting is on. That setting is off by default. Every <code>cellular_polling_period_ms</code> (1000 ms by default), it runs <code>mmcli -m &lt;modem&gt; --output-json</code> through ModemManager. It also follows the active modem, which changes when the eSIM profile changes. It reads:</p>
+<ul>
+<li>the access technologies</li>
+<li>IMEI</li>
+<li>operator code and name</li>
+<li>registration and packet-service state</li>
+<li>whether a SIM is present</li>
+<li>the modem model and firmware revision</li>
+</ul>
+<p>It is used in three places:</p>
+<ul>
+<li><strong>On mission accept:</strong> emc sends <code>CellularModemInfo</code> to the server (<code>report_cellular_modem_info</code>, <code>ReportCellularModemInfoRequest</code> in <code>mc_gcs_sdk</code>).</li>
+<li><strong>In the C2 log header:</strong> the modem model and firmware come from this poller. They were removed from <code>CellularMeasurementMessage</code> (fields 13 and 14 are reserved).</li>
+<li><strong>The status <a class="g" href="../glossary.html#t-led">LED</a>:</strong> when the server connection fails, <code>ConnectionStateIndicator</code> turns it blue. It blinks if a SIM is present and stays solid if there is none.</li>
+</ul>
+<p><strong>Elsewhere</strong></p>
+<p><a class="g" href="../glossary.html#t-system_config">system_config</a> uses mmcli once at startup to allow every modem band.</p>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>
