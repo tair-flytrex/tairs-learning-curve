@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How do emc and fts communicate?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-19</div>
+        <h1 class="question">How do emc and fts communicate?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-hardware">Hardware</a><a class="tag" href="../qa.html#topic-messaging">Messaging</a></div>
+    </header>
+    <main class="answer">
+<p><a class="g" href="../glossary.html#t-emc">emc</a> talks to the <a class="g" href="../glossary.html#t-fts">FTS</a> directly over <a class="g" href="../glossary.html#t-mavlink">MAVLink</a>. Nothing goes through fcm, drone_facade, RabbitMQ or gRPC. The FTS is Flytrex's own ArduPilot-based board (<code>accessories/parachute/FlytrexFts.java</code>).</p>
+<p><strong>Transport</strong></p>
+<ul>
+<li><code>Ioio.newParachuteConnection()</code> (<code>ioio/Ioio.java:42</code>) opens a <a class="g" href="../glossary.html#t-uart">UART</a> at <code>/dev/mc/serial/fts</code>, 1,500,000 baud (<code>parachute_uart_device</code>, <code>parachute_baud_rate</code>).</li>
+<li>In <a class="g" href="../glossary.html#t-sitl">SITL</a> it opens a <a class="g" href="../glossary.html#t-tcp">TCP</a> socket instead (<code>parachute_sitl_hostname</code>, port 5762).</li>
+<li><code>Devices.java:359</code> creates <code>FlytrexFts</code> on that connection. <code>FlytrexFts</code> wraps it in <code>MavlinkConnectionWrapper</code>, which uses the dronefleet Java MAVLink library.</li>
+</ul>
+<p><strong>Keeping the link alive</strong> (<code>MavlinkConnectionWrapper</code>)</p>
+<ul>
+<li>emc sends a heartbeat to the FTS every 1 s from its own thread. Each heartbeat first waits for <code>LooperIsUnblockedIndicator</code>, which checks that emc's main looper isn't stuck. A hung emc therefore stops sending heartbeats. What the FTS firmware does when they stop is not in this repo.</li>
+<li>If no FTS heartbeat arrives for 5 s, <code>onHeartbeatTimeout</code> fires and calls <code>onIoError</code>. Read errors, write errors and errors sending a heartbeat also call <code>onIoError</code>.</li>
+<li>Commands that get no <code>COMMAND_ACK</code> within 200 ms are sent again.</li>
+</ul>
+<p><strong>Setup handshake</strong> (<code>FlytrexFts.setup()</code>)</p>
+<ul>
+<li>Registers handlers for HEARTBEAT, COMMAND_ACK, SYSTEM_TIME, AUTOPILOT_VERSION, SYS_STATUS, STATUSTEXT and UAVCAN_NODE_INFO. Asks for SYS_STATUS every 1 s and <a class="g" href="../glossary.html#t-ekf">EKF</a>_STATUS_REPORT every 5 s.</li>
+<li>Sends SYSTEM_TIME, then requests the autopilot version and the banner.</li>
+<li>Waits up to 5 s for a heartbeat and checks that its type is <code>MAV_TYPE_FTS</code>.</li>
+<li>Sets <code>FTS_ENABLED=1</code>, <code>LOG_DISARMED=1</code> and any <code>parachute_params</code> from <code>mc.properties</code>, then waits until each one is acknowledged.</li>
+<li>Requests the UAVCAN node info, which carries the hardware ID.</li>
+</ul>
+<p><strong>emc → FTS</strong></p>
+<ul>
+<li><code>MAV_CMD_DO_PARACHUTE</code> enable/disable: <code>arm()</code> / <code>disarm()</code> of the parachute.</li>
+<li><code>MAV_CMD_DO_PARACHUTE</code> release: <code>trigger()</code>.</li>
+<li>Arming the FTS itself, buzzer, reboot, start a new log, set params.</li>
+<li><code>SET_LOG_LABEL</code> with the mission ID, which starts a new FTS log file, plus STATUSTEXT messages <code>Mission:&lt;id&gt; ID:&lt;vehicle&gt;</code> and <code>Mission ended</code>.</li>
+</ul>
+<p><strong>FTS → emc</strong></p>
+<ul>
+<li>Heartbeat <code>customMode</code> flags: <code>0x1</code> enabled, <code>0x2</code> healthy, <code>0x4</code> triggered. <code>baseMode</code> SAFETY_ARMED means the FTS is ready.</li>
+<li>When a flag changes, <code>processHeartbeat</code> raises <code>onParachuteArmed</code>, <code>onParachuteDisarmed</code> or <code>onParachuteTriggered</code>. <code>NewMissionLogic</code> listens for these.</li>
+<li>SYS_STATUS reports pre-arm and sensor health, which the preflight checks use.</li>
+</ul>
+<p><strong>Logs</strong></p>
+<p>After a flight, emc downloads the FTS <code>.bin</code> log over the same link (<code>mavlink.downloadLog</code>) and uploads it as <code>FTS_LOG</code>. It only does this when <code>fts_log_upload_postflight</code> is set.</p>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>

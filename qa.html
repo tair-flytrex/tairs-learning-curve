@@ -58,6 +58,13 @@ main { padding-block: 20px 64px; display: grid; gap: 14px; }
 // Topics in use: Architecture, Services, OTA & firmware, Hardware, Messaging, Repo & tooling, Testing, Missions
 const QA = [
     {
+        file: "qa/2026-11-19-emc-fts-communication.html",
+        date: "2026-11-19",
+        q: "How do emc and fts communicate?",
+        tags: ["Hardware", "Messaging"],
+        summary: "Directly, over MAVLink on a dedicated serial UART (/dev/mc/serial/fts, 1.5 Mbaud; TCP in SITL). Heartbeats go both ways. emc arms, disarms and triggers with MAV_CMD_DO_PARACHUTE. The FTS reports enabled, healthy and triggered flags in its heartbeat.",
+    },
+    {
         file: "qa/2026-11-18-dronefacadeapi-clients.html",
         date: "2026-11-18",
         q: "Who accesses DroneFacadeAPI?",
