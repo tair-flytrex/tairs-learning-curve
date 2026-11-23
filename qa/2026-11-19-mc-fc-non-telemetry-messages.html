@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What messages are passed between mc and fc besides telemetry?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-19</div>
+        <h1 class="question">What messages are passed between mc and fc besides telemetry?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-messaging">Messaging</a><a class="tag" href="../qa.html#topic-missions">Missions</a></div>
+    </header>
+    <main class="answer">
+<p>Everything between the <a class="g" href="../glossary.html#t-mc">MC</a> and the <a class="g" href="../glossary.html#t-fc">FC</a> goes through <a class="g" href="../glossary.html#t-fcm">fcm</a>, over <a class="g" href="../glossary.html#t-mavlink">MAVLink</a>. emc doesn't talk to the FC directly; its only MAVLink link is to the FTS. Each message type below is built by a class under <code>services/fcm/fcm/*/mavlink_builders/</code>.</p>
+<p><strong>Link heartbeat</strong></p>
+<ul>
+<li>fcm sends a <code>HEARTBEAT</code> to the FC every 1 s (<code>FC_HEARTBEAT_INTERVAL_MS</code>). When <a class="g" href="../glossary.html#t-sitl">SITL</a> runs faster than real time, the interval shrinks to match.</li>
+<li>drone_facade streams gRPC heartbeats to fcm. From a launchpad takeoff on, fcm watches them. If they stop, fcm stops heartbeating the FC, starts the fallback mission, and reports a Remote ID system failure (<code>_on_facade_heartbeat_failure</code>).</li>
+</ul>
+<p><strong>Mission upload</strong> (MAVLink mission protocol)</p>
+<ul>
+<li>MC → FC: <code>MISSION_CLEAR_ALL</code>, <code>MISSION_COUNT</code>, <code>MISSION_WRITE_PARTIAL_LIST</code> (to extend a mission), then one <code>MISSION_ITEM_INT</code> per item. The item commands used are <code>NAV_TAKEOFF</code>, <code>NAV_WAYPOINT</code>, <code>NAV_LAND</code>, <code>NAV_DELAY</code>, <code>CONDITION_YAW</code> and <code>DO_CHANGE_SPEED</code>.</li>
+<li>FC → MC: <code>MISSION_REQUEST</code> / <code>MISSION_REQUEST_INT</code> to ask for each item, then <code>MISSION_ACK</code>.</li>
+<li>During flight the FC sends <code>MISSION_ITEM_REACHED</code>. fcm turns it into waypoint-reached events.</li>
+</ul>
+<p><strong>Flight commands</strong> (<code>COMMAND_LONG</code> / <code>COMMAND_INT</code>, answered with <code>COMMAND_ACK</code>)</p>
+<ul>
+<li><code>COMPONENT_ARM_DISARM</code>: arm, disarm, force disarm.</li>
+<li><code>DO_SET_MODE</code>: switch the <a class="g" href="../glossary.html#t-modes">flight mode</a>. Also used to set the safety switch.</li>
+<li><code>MISSION_START</code>, <code>DO_PAUSE_CONTINUE</code>: start a mission, or stop on the path.</li>
+<li><code>NAV_LAND</code>: land now.</li>
+<li><code>DO_REPOSITION</code>: move in GUIDED, relative or absolute (for example hover at an altitude). <code>SET_POSITION_TARGET_GLOBAL_INT</code> sends GUIDED position targets.</li>
+<li><code>DO_CHANGE_SPEED</code>, <code>CONDITION_YAW</code>: set speed and heading.</li>
+<li><code>DO_FALLBACK_MISSION</code>: run the fallback mission. This is a Flytrex ArduPilot command, not standard MAVLink.</li>
+<li><code>DO_SET_HOME</code>: set home at takeoff.</li>
+<li><code>BATTERY_RESET</code>: reset the battery's remaining-capacity count.</li>
+<li><code>PREFLIGHT_REBOOT_SHUTDOWN</code>: reboot the FC, or kill it with the magic parameters 42/24/71/94. Kill is a test custom command.</li>
+</ul>
+<p><strong>Configuration and identity</strong></p>
+<ul>
+<li><code>PARAM_SET</code> / <code>PARAM_REQUEST_READ</code>, answered with <code>PARAM_VALUE</code>. fcm pushes the initial params at startup and after a reboot, and applies <code>set_fc_parameters</code>.</li>
+<li><code>SET_MESSAGE_INTERVAL</code> / <code>REQUEST_MESSAGE</code>: set up which telemetry streams the FC sends.</li>
+<li><code>REQUEST_AUTOPILOT_CAPABILITIES</code>, answered with <code>AUTOPILOT_VERSION</code>. <code>UAVCAN_GET_NODE_INFO</code>, answered with <code>UAVCAN_NODE_INFO</code>. <code>DO_SEND_BANNER</code>. These give version and hardware ID.</li>
+</ul>
+<p><strong>FC logs</strong> (Flytrex extension messages)</p>
+<ul>
+<li>MC → FC: <code>SET_LOG_LABEL</code> (a unique log label per mission), <code>LOG_START_NEW</code>, <code>LOG_REQUEST_LABEL_LIST</code>, <code>LOG_REQUEST_DATA_BY_LABEL</code>, <code>LOG_REQUEST_END</code>.</li>
+<li>FC → MC: <code>LOG_LABEL</code> and <code>LOG_DATA_EXTENDED</code>, which carry the log download.</li>
+<li><code>STATUSTEXT</code> goes both ways. MC → FC writes into the FC log (<code>write_to_fc_log</code>). FC → MC carries ArduPilot text messages.</li>
+</ul>
+<p><strong>Remote ID and ADS-B</strong></p>
+<ul>
+<li>MC → FC: the <a class="g" href="../glossary.html#t-odid">Open Drone ID</a> messages <code>OPEN_DRONE_ID_BASIC_ID</code>, <code>SELF_ID</code>, <code>SYSTEM</code>, <code>SYSTEM_UPDATE</code>, <code>OPERATOR_ID</code> and <code>ARM_STATUS</code>, from <code>OpenDroneIdCoordinator</code>. <code>OPEN_DRONE_ID_LOCATION</code> also shows up in fcm's ODID code.</li>
+<li>FC → MC: <code>ADSB_VEHICLE</code>, nearby traffic. fcm checks it for well-clear violations (<code>adsb/</code>).</li>
+</ul>
+<p>Not MAVLink but related: fcm also publishes <code>VeerOffPathStatus</code> on RabbitMQ from a periodic geofence-veering check. Test-only custom commands can also fake FC link drops or failed mission uploads.</p>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>

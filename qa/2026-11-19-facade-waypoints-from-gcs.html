@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How does the drone facade receive waypoints from the GCS (in what structure)?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-19</div>
+        <h1 class="question">How does the drone facade receive waypoints from the GCS (in what structure)?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-messaging">Messaging</a><a class="tag" href="../qa.html#topic-missions">Missions</a></div>
+    </header>
+    <main class="answer">
+<p>The waypoints arrive as the <a class="g" href="../glossary.html#t-gcs">GCS</a>'s own <a class="g" href="../glossary.html#t-json">JSON</a>, unchanged. <a class="g" href="../glossary.html#t-emc">emc</a> only wraps it. <a class="g" href="../glossary.html#t-drone_facade">drone_facade</a> parses the JSON and converts it to its own <a class="g" href="../glossary.html#t-proto">protobuf</a> mission items.</p>
+<p><strong>1. GCS → emc</strong></p>
+<p><a class="g" href="../glossary.html#t-mm">Mission Manager</a> sends <a class="g" href="../glossary.html#t-jsonrpc">JSON-RPC</a> requests over a <a class="g" href="../glossary.html#t-ws">WebSocket</a>. Waypoints come in <code>set_flight_plan</code>, <code>update_flight_plan</code> (an extension) and <code>set_rtl_flight_plan</code>. <code>set_mission</code> carries the mission id, the <code>takeoff_node</code> (launch point) and <code>config</code> (safe-up altitude and timeout, pickup from launchpad).</p>
+<p><strong>2. emc → facade</strong> (<code>server/MissionServer.java:684</code>)</p>
+<p>emc puts every request into a gRPC <code>ServerMessage</code> (<code>drone_facade.proto:47</code>) and calls <code>report_server_message</code>:</p>
+<ul>
+<li><code>message_type</code>: the JSON-RPC method, e.g. <code>"set_flight_plan"</code>.</li>
+<li><code>payload</code>: the JSON-RPC <code>params</code> as UTF-8 JSON bytes, unchanged.</li>
+<li><code>request_id</code>: the JSON-RPC id, so the facade's reply can be matched.</li>
+<li><code>is_downlink</code>: true for messages from the ground.</li>
+</ul>
+<p><strong>3. The JSON shape</strong> (the fields the converter reads)</p>
+<ul>
+<li><code>flight_plan_id</code>, an optional <code>dock_parameters</code> (position, yaw_heading, altitude_msl, height_agl) and <code>is_dock_takeoff</code>.</li>
+<li><code>flight_legs[]</code>. Each leg has:
+<ul>
+<li><code>nodes[]</code>: each node has an <code>id</code>, a <code>point</code> {<code>lat</code>, <code>lng</code>, <code>ca_m</code> (cruise altitude, MSL), <code>ge_m</code> (ground elevation, MSL)} and an optional <code>safe_up_path[]</code> of points.</li>
+<li><code>simplified_node_indexes[]</code>: which nodes are turn points. The first and last nodes always are.</li>
+<li><code>post_action</code>: <code>pickup</code>, <code>dropoff</code>, <code>landing</code> or <code>dock_landing</code>.</li>
+</ul></li>
+</ul>
+<p><strong>4. JSON → protobuf</strong> (<code>drone_facade/old_api_message_converters/server_message_converter.py</code>)</p>
+<p><code>ServerMessageHandlers</code> (<code>server_handlers.py</code>) queues the message. <code>ServerMessageConverter._convert_message</code> runs <code>json.loads</code> on the payload and picks a converter by <code>message_type</code>:</p>
+<ul>
+<li><code>set_mission</code> → <code>SetGcsMissionRequest</code>.</li>
+<li><code>set_flight_plan</code> → <code>SetGcsMissionItemsRequest</code>, which includes a takeoff.</li>
+<li><code>update_flight_plan</code> → <code>ExtendGcsMissionItemsRequest</code>, with no takeoff.</li>
+</ul>
+<p><code>_convert_flight_legs_to_mission_items</code> builds a list of <code>GcsMissionItem</code>s:</p>
+<ul>
+<li>A <code>TakeoffManeuver</code> first, with launchpad, post-ascend and cruising-altitude waypoints taken from the first node.</li>
+<li>For each leg, a <code>WaypointMission</code> item. Each node becomes an <code>ExecutableWaypoint</code>: lat/lng, altitude MSL = <code>ca_m</code>, ground altitude = <code>ge_m</code>, <code>uid</code> = the node id, and <code>is_turn</code> from <code>simplified_node_indexes</code>.</li>
+<li>Each waypoint also gets descent, fallback and <a class="g" href="../glossary.html#t-safeup">safed-up</a> strategies, and a <code>path_to_safe_point</code> made from <code>safe_up_path</code> (or the node itself if there is none).</li>
+<li>Then a maneuver item for the leg's <code>post_action</code>: pickup, dropoff, land, or <a class="g" href="../glossary.html#t-dock">dock</a> enter.</li>
+</ul>
+<p>The converter also maps each protobuf waypoint uid back to the GCS node id (<code>waypoint_uid_to_flight_path_node_id_converter.py</code>), so progress reports to the ground use the GCS's node ids. Finally, <code>_call_drone_service_with_server_message</code> passes the request to the mission executor. When it flies a leg, the <code>WaypointMission</code> is sent to fcm, which turns it into MAVLink.</p>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>

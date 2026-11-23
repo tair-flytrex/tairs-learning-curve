@@ -58,6 +58,20 @@ main { padding-block: 20px 64px; display: grid; gap: 14px; }
 // Topics in use: Architecture, Services, OTA & firmware, Hardware, Messaging, Repo & tooling, Testing, Missions
 const QA = [
     {
+        file: "qa/2026-11-19-facade-waypoints-from-gcs.html",
+        date: "2026-11-19",
+        q: "How does the drone facade receive waypoints from the GCS (in what structure)?",
+        tags: ["Messaging", "Missions"],
+        summary: "As raw GCS JSON (set_flight_plan / update_flight_plan: flight_legs with nodes, turn indexes and post_action), wrapped by emc in a gRPC ServerMessage. The facade's ServerMessageConverter turns it into protobuf GcsMissionItems with WaypointMissions.",
+    },
+    {
+        file: "qa/2026-11-19-mc-fc-non-telemetry-messages.html",
+        date: "2026-11-19",
+        q: "What messages are passed between mc and fc besides telemetry?",
+        tags: ["Messaging", "Missions"],
+        summary: "All through fcm over MAVLink: heartbeats, mission upload (MISSION_COUNT/ITEM_INT/ACK), commands (arm, mode, land, reposition, fallback, reboot), params, log labelling and download, STATUSTEXT, Open Drone ID out and ADSB_VEHICLE in.",
+    },
+    {
         file: "qa/2026-11-19-emc-fts-communication.html",
         date: "2026-11-19",
         q: "How do emc and fts communicate?",
