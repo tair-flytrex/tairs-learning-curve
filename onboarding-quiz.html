@@ -269,23 +269,78 @@ doors close</code></pre>
         </article>
 
         <article class="card" id="q9">
-            <h2><span class="num">9</span>Placeholder question 9</h2>
-            <p class="tldr"><span class="label">TL;DR</span>Placeholder. Short answer goes here.</p>
+            <h2><span class="num">9</span>Go over the EKF with Guy Goldchmiet. What is its purpose in the system? What sensors contribute to its input?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>The EKF (EKF3) runs on the FC and fuses the sensors into one best estimate of attitude, velocity, position and height, which the controllers, failsafes and MC all rely on. On SKY II its inputs are the IMUs, two RTK GPS units (which also give yaw via moving baseline, instead of a compass), the barometer, and possibly the rangefinder.</p>
             <details>
                 <summary>Full answer</summary>
                 <div class="answer">
-                    <p>Placeholder. Full answer goes here.</p>
+                    <p>The EKF is the FC's state estimator. Since the FC fork is based on ArduPilot 4.5.7, it's <strong>EKF3</strong>. The sensor side below comes from Flytrex's <a href="https://flytrex.atlassian.net/wiki/spaces/FRD/pages/3261792257">GPS RTK Flow</a> page and the moving-baseline tickets. The <code>EK3_SRC*</code> parameter values aren't documented in anything I found, so they're worth going over with Guy.</p>
+                    <p><strong>Purpose</strong></p>
+                    <p>No single sensor gives the drone a reliable picture of where it is and how it's oriented. The IMUs are fast but drift, GPS is accurate but slow and can drop out, and the barometer is noisy. The Extended Kalman Filter fuses them all into one best estimate of the drone's state:</p>
+                    <ul>
+                        <li><strong>What it estimates:</strong> attitude, velocity, position and height.</li>
+                        <li><strong>Error terms:</strong> it also estimates sensor errors such as gyro and accelerometer biases, plus wind.</li>
+                        <li><strong>The basic cycle:</strong> it predicts the state forward using the IMUs. It then corrects that prediction whenever a measurement arrives from GPS, the barometer and so on.</li>
+                        <li><strong>Rejecting bad data:</strong> it checks each measurement against what it expected (an "innovation" check) and rejects ones that don't fit.</li>
+                        <li><strong>Multiple IMUs:</strong> it runs one copy of the filter ("lane") per IMU and switches lanes if one goes bad.</li>
+                    </ul>
+                    <p>Almost everything downstream depends on this estimate:</p>
+                    <ul>
+                        <li>the attitude controller, and PosControl and WPNav from earlier questions</li>
+                        <li>the EKF and GPS failsafes and pre-arm checks</li>
+                        <li>the telemetry the MC receives over MAVLink (position, attitude, <code>EKF_STATUS_REPORT</code>), which drives MC decisions such as route-deviation and GPS-quality checks</li>
+                    </ul>
+                    <p>The FTS is also an ArduCopter fork with its own IMUs, so it most likely runs its own EKF independently of the FC. Worth confirming with Guy.</p>
+                    <p><strong>Sensors that feed it on SKY II</strong></p>
+                    <ul>
+                        <li><strong>IMUs (gyros and accelerometers):</strong> these drive the prediction step, and there are several of them for redundancy.</li>
+                        <li><strong>GPS, two FNUR units with RTK:</strong> these provide position and velocity, accurate to centimetres when RTK is fixed. The corrections come from a ground base station. They pass through the RTK caster server to the RTK distributor service on the MC, and from there to GPS 0 over the CAN bus.</li>
+                        <li><strong>GPS yaw (moving baseline) instead of a compass:</strong> this is the Flytrex-specific part. SKY II doesn't use a compass. GPS 0 acts as a moving base for GPS 1. Since the FC knows where both antennas are mounted, it can calculate the heading from the vector between them (<a href="https://github.com/Flytrex/flytrex_ardupilot/pull/349">FWD-617</a>, <a href="https://flytrex.atlassian.net/browse/MD-481">MD-481</a>). FTX still uses a compass, the RM3100 in the FNU.</li>
+                        <li><strong>Barometer:</strong> this is the usual height source. Baro drift shows up as an FC pre-arm failure (CAUS-2031).</li>
+                        <li><strong>Rangefinder (altimeter):</strong> it measures height above the ground, which matters near the ground and for landing. Whether it's fused as an EKF height source or only used for terrain and landing logic depends on the <code>EK3_SRC1_POSZ</code> / <code>EK3_RNG_USE_HGT</code> configuration, so ask Guy.</li>
+                    </ul>
+                    <p><strong>Questions to ask Guy</strong></p>
+                    <ul>
+                        <li>Which <code>EK3_SRC1_*</code> sources are set (position, velocity, height, yaw)? Are there alternate source sets?</li>
+                        <li>What does the EKF do if GPS yaw is lost mid-flight, given there's no compass to fall back on?</li>
+                        <li>How do EKF lane switches and the EKF failsafe show up to the MC?</li>
+                    </ul>
                 </div>
             </details>
         </article>
 
         <article class="card" id="q10">
-            <h2><span class="num">10</span>Placeholder question 10</h2>
-            <p class="tldr"><span class="label">TL;DR</span>Placeholder. Short answer goes here.</p>
+            <h2><span class="num">10</span>Go over the IMU with Guy Goldchmiet. What is its purpose in the system? How does the FC use it?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>The IMU (gyros and accelerometers) is the FC's fastest, self-contained motion sensor. The FC uses it directly to stabilize the drone in the inner control loop, and as the prediction input of the EKF. There are three IMUs for redundancy, kept at a stable temperature and monitored for vibration and failures.</p>
             <details>
                 <summary>Full answer</summary>
                 <div class="answer">
-                    <p>Placeholder. Full answer goes here.</p>
+                    <p>The IMU (inertial measurement unit) is the FC's motion sensor: gyroscopes measure rotation rate and accelerometers measure acceleration, both on three axes. The Flytrex-specific details below come from the <a href="https://flytrex.atlassian.net/wiki/spaces/EL/pages/3336634373">SKY II Flyhawk EOL TA</a>, the <a href="https://flytrex.atlassian.net/wiki/spaces/OP/pages/2148139009">sUA Return To Service Log Analysis</a> and the <a href="https://flytrex.atlassian.net/wiki/spaces/FRD/pages/3706781704">take-off prohibition tests</a>. The rest is standard ArduPilot behavior.</p>
+                    <p><strong>Purpose</strong></p>
+                    <p>The IMU is the fastest and most fundamental sensor on the drone. It's sampled at kHz rates and doesn't depend on anything outside the drone: no satellites, no air pressure, no magnetic field. That makes it the only sensor fast enough to keep a multirotor stable, so everything else is used to correct it. On its own it drifts within seconds, because integrating rates and accelerations piles up error, which is why the EKF exists.</p>
+                    <p><strong>How the FC uses it</strong></p>
+                    <ul>
+                        <li><strong>Inner-loop stabilization.</strong> The gyro rates feed the rate controller directly, after filtering. That loop runs at the main loop rate (hundreds of Hz) and drives the motors. It's the loop that physically keeps the drone level.</li>
+                        <li><strong>EKF prediction.</strong> In the EKF from question 11, the IMU drives the prediction step: the gyro and accelerometer readings move the attitude, velocity and position estimate forward between GPS and barometer updates.</li>
+                        <li><strong>EKF lanes.</strong> The FC has three IMUs, and the third was added in <a href="https://github.com/Flytrex/onboard-ng/pull/1287">onboard-ng#1287</a>, with <code>EK3_IMU_MASK 7</code>. The EKF runs one lane per IMU and switches to another lane if the active one goes bad.</li>
+                        <li><strong>Bias estimation.</strong> The EKF continuously estimates gyro and accelerometer biases, so slow drift gets corrected in flight.</li>
+                        <li><strong>Temperature stabilization.</strong> IMU bias changes with temperature. The Flyhawk has a heater circuit that keeps the gyros at a stable temperature ("Gyro temperature stabilization" in the EOL TA), and the FC temperature is a take-off prohibition check.</li>
+                        <li><strong>Health and vibration monitoring.</strong>
+                            <ul>
+                                <li>The FC logs vibration levels and clipping per IMU (the <code>VIBE</code> log message). Clipping means acceleration exceeded the sensor's range.</li>
+                                <li>The return-to-service log analysis checks for high vibrations and clipping, and for gyro anomalies above 0.1 rad/s before takeoff on all three IMUs.</li>
+                                <li>Gyro and accelerometer failures block takeoff. They can be simulated with <code>fail gyro|accel severe|acute|critical</code>, and in flight the severity decides between RTL or Safe Up, a short flight to land, and the FTS.</li>
+                            </ul>
+                        </li>
+                    </ul>
+                    <p><strong>The FTS has its own IMUs</strong></p>
+                    <p>The FTS has its own IMUs, separate from the FC's. That's how it detects free fall and flips by itself even when the FC or main power has failed, as in question 1.</p>
+                    <p><strong>Questions to ask Guy</strong></p>
+                    <ul>
+                        <li>Which IMU chips are on the Flyhawk, and how are they mounted? Are they vibration-isolated?</li>
+                        <li>How are the gyro filters set (low-pass and harmonic notch on motor RPM)?</li>
+                        <li>What heater target temperature is used, and how long is the warm-up before arming?</li>
+                    </ul>
                 </div>
             </details>
         </article>
