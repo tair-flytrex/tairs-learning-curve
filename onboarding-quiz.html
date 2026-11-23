@@ -50,18 +50,294 @@ main { padding-block: 16px 64px; display: grid; gap: 14px; }
         <!-- One <article> per question. Copy this block, change the number, question,
              TL;DR and full answer. The full answer takes the same HTML as the qa/ pages
              (<p>, <ul>, <code>, <a class="g" href="glossary.html#t-..."> for glossary links). -->
+
         <article class="card" id="q1">
-            <h2><span class="num">1</span>Dummy question: what does the Mission Computer do?</h2>
-            <p class="tldr"><span class="label">TL;DR</span>Dummy short answer: it accepts delivery missions from the ground and flies them by commanding the flight controller.</p>
+            <h2><span class="num">1</span>If the battery runs out completely, how does the parachute open? Please describe the flow of events.</h2>
+            <p class="tldr"><span class="label">TL;DR</span>The FTS keeps running on the mainboard supercap after main power dies, detects the free fall with its own IMUs, and fires the gas generator to eject the parachute, as long as it's still armed.</p>
             <details>
                 <summary>Full answer</summary>
                 <div class="answer">
-                    <p>Dummy full answer, here to show the layout. It will be replaced by the real one.</p>
+                    <p>I looked through Flytrex's Confluence and Jira. I couldn't find one design document that describes this exact scenario from start to finish. The flow below is put together from several sources: incident reports, FTS test plans, and mainboard and supercap tickets. It's reasonably well supported, but the Electronics team should confirm the hardware details.</p>
+                    <p><strong>Flow of events when the main battery fully depletes in flight</strong></p>
+                    <ol>
+                        <li><strong>Normally it never gets this far.</strong> The MC has low-battery and very-low-battery thresholds that trigger RTL or an emergency landing well before 0%. The one documented case of a true 0% depletion, <a href="https://flytrex.atlassian.net/wiki/spaces/LAB/pages/2070216705">sUA 1026 in March 2022</a>, happened because the link was lost and the drone hovered over the drop-off point until the battery ran out.</li>
+                        <li><strong>Main power collapses.</strong> As the pack hits cutoff, the ESCs and motors lose thrust. The FC and MC may brown out along with them. From that point the flight stack can't command anything, including a parachute trigger.</li>
+                        <li><strong>The FTS stays alive on the supercap.</strong> The mainboard has a supercapacitor backup power path that keeps the FTS and its trigger circuit running after main power is lost. Several things point to this:
+                            <ul>
+                                <li>Field errors such as "Supercap is in backup mode" appear in the logs.</li>
+                                <li>The FTS runs capacitance and ESR built-in tests on the supercap, and a failed supercap fails the FTS pre-arm checks (<a href="https://flytrex.atlassian.net/browse/WOR-4656">WOR-4656</a>), so a drone shouldn't take off without it.</li>
+                                <li>In <a href="https://flytrex.atlassian.net/browse/CAUS-286">CAUS-286</a>, the buzzer kept sounding for about 60 seconds after the drone was powered off.</li>
+                            </ul>
+                        </li>
+                        <li><strong>The FTS detects the fall by itself.</strong> It has its own IMUs and decides on its own, so it doesn't need a command from the MC. It watches for free fall and abnormal attitude, using thresholds such as <code>FTS_FLIP_CRT</code> and <code>FTS_FLIP_TIME</code>. The <a href="https://flytrex.atlassian.net/wiki/spaces/FRD/pages/2639822858">Parachute Safety SW investigation</a> notes that even if the MC fails to trigger, the FTS senses the free fall and triggers on its own.</li>
+                        <li><strong>The FTS fires the parachute.</strong> This only works if the FTS is armed. It stays armed for the whole flight and is disarmed only by the MC, through the safety switch, during landing. The FTS then drives the pyro trigger circuit (PYRO_ARM and PYRO_TRIG) to fire the gas generator, which ejects the parachute. It also cuts the motors, if anything is still spinning, and sounds the buzzer.</li>
+                        <li><strong>The drone descends under canopy.</strong> In the 2022 incident, the motors stopped, the parachute triggered, and the drone came down with only airframe damage (latches, arms, top cover).</li>
+                    </ol>
+                    <p><strong>Caveats</strong></p>
                     <ul>
-                        <li>A list item with <code>inline_code</code> in it.</li>
-                        <li>A list item with a glossary link: <a class="g" href="glossary.html#t-emc">emc</a>.</li>
+                        <li><strong>If the FTS was already disarmed</strong>, it won't deploy. This happens during the final landing phase, after the MC disarms near 10 m.</li>
+                        <li><strong>The FTS depends on a healthy supercap.</strong> That's why a supercap failure blocks takeoff.</li>
+                        <li><strong>SKY II mainboard trigger-circuit defect.</strong> <a href="https://flytrex.atlassian.net/browse/FWD-733">FWD-733</a> describes a known issue: the pyro self-test can pass even when a firing FET can't close, so in that failure the gas generator wouldn't fire. SKY III redesigns the circuit to test the high-side and low-side FETs separately.</li>
                     </ul>
-                    <p>A closing paragraph, so the spacing between paragraphs and lists is visible.</p>
+                    <p>If you need the exact holdup time of the supercap or the brown-out thresholds, those weren't in anything I found. The Electronics space owners of the mainboard design would be the right people to ask.</p>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q2">
+            <h2><span class="num">2</span>If the drone loses cell service, what happens?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>The MC tries to reconnect for a short grace period (about 10–17 s). If it can't, the drone Safes Up: it aborts the mission, flies to its Safe Landing Point and hovers, and lands there when the countdown ends if the link never comes back.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>When the drone loses cell service, the Mission Computer (MC) loses its connection to the GCS. It waits a short grace period to reconnect. If it can't, it automatically goes into <strong>Safe Up</strong>. I've written this up from the Product page <a href="https://flytrex.atlassian.net/wiki/spaces/PROD/pages/3130720271">Drone &amp; GCS Connection Loss Scenarios</a>, the <a href="https://flytrex.atlassian.net/wiki/spaces/PROD/pages/3178594320">Adaptive Flight Logic Reference Manual</a>, and the <a href="https://flytrex.atlassian.net/wiki/spaces/FRD/pages/3706159106">MC 3.0 disconnection test plan</a>.</p>
+                    <p><strong>Flow of events</strong></p>
+                    <ol>
+                        <li><strong>Detection.</strong> The MC pings the GCS over its WebSocket. If no reply comes back within the ping timeout, it closes the socket and treats the link as down. The timing is set by <code>server_ping_interval_ms</code>, which can be changed in Oversight Admin.</li>
+                        <li><strong>Grace period.</strong> The MC keeps trying to reconnect, with a 1-second gap between attempts. The grace period is set by <code>server_reconnection_grace_ms</code>. The MC 3.0 test plan uses 10 seconds; the Product page mentions about 17 seconds in total, depending on parameters. If the link comes back within the grace period, the drone just carries on with its mission.</li>
+                        <li><strong>Safe Up.</strong> If the grace period runs out, the drone aborts the mission and flies to its designated Safe Landing Point, then hovers there at Safe Hover Altitude. Some phases are handled differently:
+                            <ul>
+                                <li><strong>Takeoff below 10 m:</strong> it does an Emergency Land on the launchpad instead.</li>
+                                <li><strong>Descending to or landing at the launchpad:</strong> it just continues and lands.</li>
+                                <li><strong>Pickup or delivery in progress:</strong> it deals with the package first, depending on exactly where it is in the process (fast release or controlled release, wire retraction), and then does Safe Up.</li>
+                            </ul>
+                        </li>
+                        <li><strong>Reconnection attempts continue</strong> throughout Safe Up. If the link comes back, the drone stays in Safe Up rather than resuming the mission. The RPIC then has to decide what happens next, such as triggering an RTL.</li>
+                        <li><strong>If the link never comes back,</strong> the drone hovers in Safed Up until a countdown ends and then lands at the Safe Landing Point. The test plan's expected result is "Finish the countdown and land."</li>
+                    </ol>
+                    <p><strong>Other things that still work</strong></p>
+                    <ul>
+                        <li><strong>Before takeoff:</strong> if there's no server connection, the "Server Communication" check fails and the RPIC app won't approve takeoff.</li>
+                        <li><strong>Onboard safety is independent of cell service.</strong> The FC and FTS don't need the cell link. So during a disconnection, FC Loss fallback and autonomous FTS triggers (veering, angle or speed breach, unreliable GPS) still work, and they take priority over Safe Up.</li>
+                        <li><strong>The RPIC's tablet losing connection has a similar effect.</strong> If the RPIC tablet disconnects from the GCS for more than about 5 seconds, every drone that RPIC has in the air goes into Safe Up.</li>
+                    </ul>
+                    <p>For contrast, the March 2022 incident from your last question, where the drone hovered with no link until the battery hit 0%, happened on much older MC logic. Today's Safe Up countdown and the very-low-battery Emergency Land are meant to prevent exactly that.</p>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q3">
+            <h2><span class="num">3</span>What is the difference between the Safe Up and Emergency Land failure modes?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>Both fly to the Safe Landing Point. Safe Up hovers there and waits, for problems that might clear up; Emergency Land lands right away, for problems with the drone itself. Emergency Land has the higher priority.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>Both modes abort the mission and send the drone to a <strong>Safe Landing Point</strong>. The difference is what happens when it gets there: Safe Up stops and hovers there to wait, while Emergency Land puts the drone down right away. This is all from the <a href="https://flytrex.atlassian.net/wiki/spaces/PROD/pages/3178594320">Adaptive Flight Logic Reference Manual</a>.</p>
+                    <p><strong>Safe Up</strong> has two phases. In <em>Safing Up</em> the drone flies to the Safe Landing Point and descends to Safe Hover Altitude. In <em>Safed Up</em> it hovers there and waits for one of three things: an RPIC command such as RTL, a timeout countdown that ends in landing, or a higher-priority failure mode. The idea is to get the drone out of the way while keeping the option of recovering it, because the problem might clear up, like a cellular link coming back.</p>
+                    <p><strong>Emergency Land</strong> does the same flight to the Safe Landing Point but lands immediately, with no hover and no Safed Up phase. It's for problems where staying in the air is itself the risk.</p>
+                    <p><strong>What triggers each one</strong></p>
+                    <ul>
+                        <li><strong>Safe Up</strong> is triggered by recoverable or "information" problems:
+                            <ul>
+                                <li>RPIC↔server or MC↔server disconnection</li>
+                                <li>an invalid flight plan, or an attempt to start an invalid flight leg</li>
+                                <li>a low-risk ADS-B alert</li>
+                                <li>GPS degrading to "Bad"</li>
+                                <li>failure to upload the fallback mission to the FC</li>
+                                <li>a manual RPIC command</li>
+                            </ul>
+                        </li>
+                        <li><strong>Emergency Land</strong> is triggered by problems with the drone itself:
+                            <ul>
+                                <li>battery at "Very low", or a battery failure</li>
+                                <li>FC/FTS overtemperature</li>
+                                <li>a failed post-takeoff check</li>
+                                <li>a Well Clear Alert</li>
+                                <li>critical compass or motor failure (FTX only)</li>
+                                <li>a manual RPIC command</li>
+                            </ul>
+                        </li>
+                    </ul>
+                    <p><strong>Priority</strong></p>
+                    <p>Emergency Land ranks higher: it is 4th, while Safing Up is 5th and Safed Up is 8th, the lowest of all. So an Emergency Land trigger can override a drone that's Safing Up. Once a drone is Safed Up, almost any other mode can take over, including RTL and Emergency Land. That's how a drone hovering after a disconnection still lands if its battery hits "Very low".</p>
+                    <p><strong>Behavior differences by phase</strong></p>
+                    <ul>
+                        <li><strong>Takeoff below 10 m:</strong> a Safe Up trigger is turned into an Emergency Land, so the drone lands on the launchpad.</li>
+                        <li><strong>Takeoff at or above 10 m:</strong> Safe Up climbs to Safe Hover Altitude and hovers over the launchpad, while Emergency Land lands on the pad.</li>
+                        <li><strong>Landing at the launchpad, above 10 m:</strong> Safe Up aborts the landing and climbs back up to hover, while Emergency Land just finishes the landing.</li>
+                        <li><strong>Delivery or pickup:</strong> both handle the package the same way first (fast or controlled release, retracting the wire). After that, Safe Up ends in a hover and Emergency Land ends on the ground.</li>
+                    </ul>
+                    <p><strong>The FTS</strong></p>
+                    <p>When an Emergency Land puts the drone at cruising altitude above the Safe Landing Point, the FTS is disarmed, because the drone is about to land there on purpose. During Safe Up the FTS stays armed while the drone hovers.</p>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q4">
+            <h2><span class="num">4</span>What protocol/s do the MC and FC use to pass information between one another?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>MAVLink: ArduPilot's protocol plus Flytrex's custom messages. It runs over UART on older airframes and most likely over USB on SKY II Block 3.1 and later.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>The MC and FC talk using <strong>MAVLink</strong>: the standard ArduPilot protocol, extended with Flytrex's own message definitions. The FTS uses the same protocol to talk to the MC.</p>
+                    <p><strong>Protocol and link</strong></p>
+                    <ul>
+                        <li><a href="https://flytrex.atlassian.net/wiki/spaces/FRD/pages/1840709650">R&amp;D Software Components</a> says the MC communicates with the FC and FTS via MAVLink over UART.</li>
+                        <li>The FC is a fork of ArduCopter. Flytrex keeps its custom MAVLink definitions in a separate repo, <a href="https://github.com/Flytrex/ardupilot_mavlink">Flytrex/ardupilot_mavlink</a>.</li>
+                        <li><strong>The physical link may depend on the airframe.</strong> The <a href="https://flytrex.atlassian.net/wiki/spaces/FRD/pages/2471264279">Drone system diagram</a> lists "USB for FC &amp; FTS MAVLink" as a change introduced in SKY II Block 3.1. So on current SKY II, MAVLink likely runs over USB rather than UART, and the "UART" on the Software Components page may refer to older airframes (FTX). The <a href="https://flytrex.atlassian.net/wiki/spaces/EL/pages/2408546305">SKY II/III Mainboard I/O</a> page should confirm this.</li>
+                    </ul>
+                    <p><strong>What goes over the link</strong> (examples from pages already covered):</p>
+                    <ul>
+                        <li><strong>Heartbeats in both directions.</strong> If either side misses heartbeats for 5 seconds, that's what triggers FC Loss.</li>
+                        <li><strong>Telemetry from the FC.</strong> The MC reads things like the landed state from <code>EXTENDED_SYS_STATUS</code> and the flight mode from the heartbeat's custom-mode field, checking every 250 ms.</li>
+                        <li><strong>Commands and mission uploads from the MC.</strong> This includes uploading the fallback mission to the FC; a failed upload triggers FC Loss or Safe Up. It also includes <code>DO_PARACHUTE</code>, which the MC sends to the FTS to toggle its safety switch (arm/disarm).</li>
+                    </ul>
+                    <p><strong>Other links, for context</strong></p>
+                    <p>The MC, FC and FTS are also all on the <strong>CAN bus</strong>, but that's for <strong>DroneCAN</strong> traffic with peripherals rather than MC↔FC traffic. Those peripherals include the Flytrex Navigation Unit (GPS and compass), the Flytrex Propulsion Controller (ESCs), and on SKY II Block 3.2/3.3 the second CAN bus (BLUCAN) with a move toward CAN FD. The delivery mechanism's motor controller (EVESC) talks to the MC over UART.</p>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q5">
+            <h2><span class="num">5</span>If the drone attempts to Safe Up, but then an RTL is initiated, what would happen?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>While it's still Safing Up, the RTL is ignored, because Safing Up outranks RTL. Once it's Safed Up and hovering, an RTL from the RPIC takes over and the drone flies home; server-triggered RTLs are blocked at that point.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>It depends on which phase of Safe Up the drone is in when the RTL arrives. The answer comes from the priority table in the <a href="https://flytrex.atlassian.net/wiki/spaces/PROD/pages/3178594320">Adaptive Flight Logic Reference Manual</a>, which uses this exact case as its example.</p>
+                    <p><strong>While it's still Safing Up (flying to the Safe Landing Point or descending to Safe Hover Altitude):</strong> the RTL is ignored. Safing Up is priority 5 and RTL is priority 6, and a mode can only override one with a higher priority. The drone keeps going to the Safe Landing Point. The manual doesn't say that a rejected RTL is queued, so the safe assumption is that it has to be sent again.</p>
+                    <p><strong>Once it's Safed Up (hovering above the Safe Landing Point):</strong> the RTL can take over, because Safed Up is the lowest priority (8). The drone climbs away from the Safe Landing Point and flies back to the launchpad along its route to land. The MC 3.0 regression test expects exactly this: "Ascending from the SP after safed up."</p>
+                    <p><strong>One catch: only the RPIC can do this.</strong> While the drone is Safed Up, server-triggered RTLs are blocked, so only a manual RTL from the RPIC app works. That means automatic RTL triggers that fire while the drone is hovering won't pull it home on their own, including battery "Low", ADS-B failure, Remote ID failure, and GPS degrading to "Partial". The RPIC has to make that decision. A Very low battery still triggers an Emergency Land, which outranks Safed Up, so the drone can't just hover until the battery runs out.</p>
+                    <p><strong>During takeoff, the outcome is different.</strong> Here the drone hovers over the launchpad rather than over a separate Safe Landing Point. RTL at this stage is handled by the parachute-arming rule:</p>
+                    <ul>
+                        <li><strong>Below 10 m:</strong> both triggers become an Emergency Land, so the drone simply lands on the pad.</li>
+                        <li><strong>At or above 10 m:</strong> Safe Up climbs to Safe Hover Altitude above the pad. A later RTL then aborts the takeoff and lands it there.</li>
+                    </ul>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q6">
+            <h2><span class="num">6</span>What operating system runs on the FC?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>ChibiOS, a small real-time OS for microcontrollers. The FTS runs it too; the MC runs Linux.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>The FC runs <strong>ChibiOS</strong>, a small real-time operating system (RTOS) made for microcontrollers.</p>
+                    <p>The <a href="https://flytrex.atlassian.net/wiki/spaces/FRD/pages/1984594017">FC New Developer Guide</a> says this directly. When you build for the real board (<code>./waf configure --board PluginFlyhawk</code>), ArduPilot's hardware abstraction layer (HAL) is linked to its ChibiOS implementation, and ChibiOS is the OS that runs on the board. This is standard for ArduPilot: on STM32-based flight controllers it uses ChibiOS. The Flyhawk board is STM32-based; the Lab has an <a href="https://flytrex.atlassian.net/wiki/spaces/LAB/pages/2007859205">ST-Link recovery page</a> for when it gets bricked.</p>
+                    <p><strong>How this compares with the rest of the drone</strong></p>
+                    <ul>
+                        <li><strong>FTS:</strong> this is the same ArduCopter fork running on the same kind of board, so it's also ChibiOS.</li>
+                        <li><strong>MC:</strong> this one is different. It runs full <strong>Linux</strong>, a Debian image forked from Variscite's, on the mainboard. That's why it can host the Java app, the Python services, RabbitMQ and gRPC.</li>
+                        <li><strong>Simulator (SITL):</strong> when the FC code is built for the simulator, it uses ArduPilot's Linux/SITL HAL instead of ChibiOS, so it runs as an ordinary process on a PC.</li>
+                    </ul>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q7">
+            <h2><span class="num">7</span>Someone from the hardware team asks you “How do I test only the opening and closing of the net?”, what do you answer?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>Send the custom command <code>doors open</code> / <code>doors close</code> from the GCS Dev UI. On SKY II it moves only the lower net servo, with no flight or package release needed.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>Here's what I'd tell them, based on <a href="https://flytrex.atlassian.net/wiki/spaces/FRD/pages/1040253041">Textual ("Custom") MC commands</a>:</p>
+                    <hr>
+                    <p>Use the <code>doors</code> custom command from the GCS Dev UI:</p>
+                    <pre><code>doors open
+doors close</code></pre>
+                    <p>You can send it from the vehicle card in the Dev UI, or from the live mission card if a mission is active. You don't need to fly or start a delivery, so the drone can sit on the bench, powered on and connected to the GCS.</p>
+                    <p>On SKY II, this moves <strong>only the lower net servo</strong>. The hook (bobbin) lock stays closed, and the winch and wire don't move. So it tests just the net opening and closing, with no package release.</p>
+                    <p>A few practical points:</p>
+                    <ul>
+                        <li>Keep hands and anything loose away from the net before you send <code>doors open</code>.</li>
+                        <li>Always finish with <code>doors close</code>, so the drone isn't left with the net open.</li>
+                        <li>The bobbin lock has its own commands, <code>package unlock-hook</code> and <code>package lock-hook</code>. Don't use those if you only want to test the net.</li>
+                    </ul>
+                    <hr>
+                    <p>That's the MC-level test, which checks the whole chain from MC through the delivery controller to the servo. If they want to test the servo below the MC, for example on a Delivery Controller board on the bench, that goes through the servo-controller module described in <a href="https://flytrex.atlassian.net/wiki/spaces/EL/pages/3576725535">Delivery Controller Firmware Architecture</a>. That page doesn't give a bench procedure, though, so the Electronics team would be the ones to ask.</p>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q8">
+            <h2><span class="num">8</span>What is the name of the first and last messages that are passed between the MC and FC during a mission upload?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>The first is <code>MISSION_COUNT</code> (MC → FC) and the last is <code>MISSION_ACK</code> (FC → MC).</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>The upload follows the standard MAVLink mission protocol:</p>
+                    <ul>
+                        <li><strong>First message: <code>MISSION_COUNT</code></strong>, sent from the MC to the FC. It tells the FC how many mission items are about to arrive, which starts the upload.</li>
+                        <li><strong>Last message: <code>MISSION_ACK</code></strong>, sent from the FC to the MC. Once the FC has received every item, it acknowledges the whole upload. A result of <code>MAV_MISSION_ACCEPTED</code> means success; anything else means the upload failed. A failure is what triggers the "Failure to update FC with fallback mission" or FC-Loss paths covered earlier.</li>
+                    </ul>
+                    <p><strong>What happens in between</strong></p>
+                    <p>The FC pulls the items one at a time. It sends <code>MISSION_REQUEST_INT</code> with a sequence number. Older implementations use the deprecated <code>MISSION_REQUEST</code> instead. The MC answers each request with <code>MISSION_ITEM_INT</code>, or <code>MISSION_ITEM</code> on older implementations. This repeats until the last item, and then the FC sends the <code>MISSION_ACK</code>.</p>
+                    <p>This exact question appears in the <a href="https://flytrex.atlassian.net/wiki/spaces/FRD/pages/2653913130">Embedded Onboarding</a> checklist. The answer above is the standard protocol. To confirm what Flytrex's MC actually sends, the onboarding's Step 6 setup (MC with FC SITL) lets you watch the exchange directly in the MC log or a MAVLink inspector. That also shows whether the MC sends a <code>MISSION_CLEAR_ALL</code> before the <code>MISSION_COUNT</code>; some ground stations do and some don't, and I couldn't confirm it from the docs.</p>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q9">
+            <h2><span class="num">9</span>Placeholder question 9</h2>
+            <p class="tldr"><span class="label">TL;DR</span>Placeholder. Short answer goes here.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>Placeholder. Full answer goes here.</p>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q10">
+            <h2><span class="num">10</span>Placeholder question 10</h2>
+            <p class="tldr"><span class="label">TL;DR</span>Placeholder. Short answer goes here.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>Placeholder. Full answer goes here.</p>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q11">
+            <h2><span class="num">11</span>What’s the difference between the AUTO and GUIDED flight modes in ArduPilot?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>AUTO flies a mission that's already stored on the FC, with no further input needed. GUIDED has no stored plan: it follows live commands from an external computer and hovers when they stop.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>Both are autonomous modes in ArduCopter. The difference is where the drone's targets come from.</p>
+                    <p><strong>AUTO</strong> flies a mission that has already been uploaded and is stored on the FC. That's the waypoint list loaded through the <code>MISSION_COUNT</code> → <code>MISSION_ACK</code> exchange from question 8. The FC works through the items on its own: waypoints, takeoff, land, loiter, DO_ commands such as changing speed or setting a servo, and so on. Once it's started, it needs no further input from the ground station or companion computer. It continues even if that link drops, though failsafes can still interrupt it.</p>
+                    <p><strong>GUIDED</strong> has no stored plan. The drone holds position and waits for live commands from an external source, such as a GCS or companion computer. Examples are <code>SET_POSITION_TARGET_GLOBAL_INT</code> or <code>SET_POSITION_TARGET_LOCAL_NED</code> (go to this position, or fly at this velocity), <code>MAV_CMD_DO_REPOSITION</code>, and yaw or altitude change commands. When it reaches a target, it stops and hovers until the next command arrives. If the commander goes silent, the drone simply holds where it is. Velocity commands are the exception: they time out after a few seconds and the drone stops.</p>
+                    <p><strong>The trade-off</strong></p>
+                    <p>AUTO is better when the route is known in advance and you want the FC to be self-sufficient. GUIDED is better for dynamic, moment-to-moment control from a smarter computer: avoidance manoeuvres, precision landing adjustments, or ad-hoc repositioning.</p>
+                    <p><strong>How this probably maps to Flytrex</strong> (my inference, not something I've confirmed in the docs):</p>
+                    <ul>
+                        <li>The <strong>fallback mission</strong> is a stored mission that the FC runs alone when the MC disappears, which is a natural fit for AUTO.</li>
+                        <li>The <strong><code>veer</code> custom command</strong> fits GUIDED well. The docs describe it as stopping the drone, flying it to an offset point, and then hovering there without continuing the mission, which is exactly GUIDED behavior.</li>
+                    </ul>
+                    <p>To see what the MC actually uses during each phase, the flight mode is in the FC heartbeat's custom-mode field. It shows up in the MC/FC logs and in the Blackbox log viewer.</p>
+                </div>
+            </details>
+        </article>
+
+        <article class="card" id="q12">
+            <h2><span class="num">12</span>What’s the difference between the PosControl and WPNav position control methods in ArduPilot?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>PosControl is the low-level controller that turns a target position or velocity into attitude and thrust, and just heads for the point. WPNav sits on top of it and generates targets along a planned path between waypoints, so the drone stays on the line.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>They're two layers of the same control stack. WPNav sits on top of PosControl and feeds it.</p>
+                    <p><strong>AC_PosControl: the low-level position controller</strong></p>
+                    <p>PosControl takes a target position, velocity and/or acceleration and works out the attitude and thrust needed to reach it. Those go to the attitude controller (AC_AttitudeControl), which then drives the motors.</p>
+                    <p>Internally it's a cascade. A position error goes through a P controller to become a velocity demand. A velocity error goes through a PID to become an acceleration demand. The acceleration is turned into lean angles for horizontal motion and throttle for vertical. Horizontal (XY) and vertical (Z) are handled by separate controllers, tuned with the <code>PSC_POSXY_P</code>, <code>PSC_VELXY_P/I/D</code>, <code>PSC_POSZ_P</code>, <code>PSC_VELZ_P</code> and <code>PSC_ACCZ_P/I/D</code> parameters.</p>
+                    <p>Since ArduPilot 4.1 its input functions (such as <code>input_pos_xyz</code> and <code>input_vel_accel_xy</code>) also shape the target kinematically. They respect speed, acceleration and jerk limits, so the drone moves smoothly rather than jumping. But PosControl has no idea of a <em>path</em>. It moves the drone toward a point from wherever the drone currently is. If wind pushes it sideways, it heads for the target from its new position and doesn't return to the original line.</p>
+                    <p><strong>AC_WPNav: waypoint navigation</strong></p>
+                    <p>WPNav works out a path between waypoints and then generates the position, velocity and acceleration targets along that path, step by step, feeding them to PosControl. Since 4.1 it uses S-curve trajectories (jerk-limited straight legs with planned cornering), plus splines for spline waypoints. It also handles cornering at waypoints, terrain following (with a rangefinder or terrain data), and the speed and acceleration limits for missions. Its parameters include <code>WPNAV_SPEED</code>, <code>WPNAV_SPEED_UP/DN</code>, <code>WPNAV_ACCEL</code>, <code>WPNAV_JERK</code>, <code>WPNAV_RADIUS</code> and <code>WPNAV_RFND_USE</code>.</p>
+                    <p>Because the targets move along the planned line, any cross-track error gets corrected, so the drone stays on the route.</p>
+                    <p><strong>Which modes use which</strong></p>
+                    <ul>
+                        <li><strong>AUTO</strong> waypoint legs go through WPNav.</li>
+                        <li><strong>GUIDED</strong> depends on the command:
+                            <ul>
+                                <li>Velocity and acceleration targets go straight to PosControl.</li>
+                                <li>By default in recent versions, position targets also go straight to PosControl, as a shaped move to a point. Setting the "use WPNav for position control" bit in <code>GUID_OPTIONS</code> sends them through WPNav instead, with S-curve path following. Check the exact bit in the parameter docs for AP 4.5.7, the version Flytrex's FC fork is based on.</li>
+                            </ul>
+                        </li>
+                        <li><strong>LOITER</strong> uses its own library (AC_Loiter), which also sits on top of PosControl.</li>
+                    </ul>
+                    <p><strong>Why it matters in practice</strong></p>
+                    <p>WPNav keeps you on the line; PosControl gets you to the point. For Flytrex this is a real distinction. The route-deviation checks (a warning at 9 m off route, the FTS at 18 m) assume the drone is tracking a line. So any manoeuvre commanded through GUIDED and PosControl, rather than as a mission leg, isn't bound by WPNav's path-following.</p>
                 </div>
             </details>
         </article>
