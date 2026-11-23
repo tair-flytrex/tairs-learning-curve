@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onboarding Quiz</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+/* Onboarding quiz only: question cards with a TL;DR and a collapsible full answer.
+   Shared styles are in style.css */
+.tools { display: flex; align-items: center; gap: 12px; padding-block: 14px 0; font-size: 16px; color: var(--muted); }
+.tools button {
+    margin-left: auto; font: inherit; font-size: 15px; color: var(--accent); cursor: pointer;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 12px;
+}
+.tools button:hover, .tools button:focus-visible { border-color: var(--accent); outline: none; }
+main { padding-block: 16px 64px; display: grid; gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; }
+.card h2 { font-size: 22px; line-height: 1.35; margin: 0; font-weight: 600; text-wrap: balance; }
+.card .num { font-family: var(--font-mono); font-size: 16px; color: var(--accent); margin-right: 8px; }
+.tldr {
+    margin: 12px 0 0; padding: 10px 14px; background: var(--accent-soft);
+    border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0;
+}
+.tldr .label { display: block; font-size: 13px; color: var(--accent); }
+.card details { margin-top: 12px; }
+.card summary { cursor: pointer; color: var(--accent); font-size: 16px; width: fit-content; }
+.card summary:hover, .card summary:focus-visible { text-decoration: underline; outline: none; }
+.card details[open] summary { margin-bottom: 10px; }
+.card .answer { max-width: 75ch; border-top: 1px solid var(--line); padding-top: 12px; }
+.card .answer > :last-child { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="index.html">&larr; Tair's Learning Curve</a>
+        <div class="eyebrow">onboard-ng · notes</div>
+        <h1>Onboarding Quiz</h1>
+        <p>The onboarding questions, each with a short answer and the full answer underneath.</p>
+    </header>
+    <div class="tools">
+        <span id="count"></span>
+        <button id="toggle" type="button">Expand all</button>
+    </div>
+    <main id="main">
+
+        <!-- One <article> per question. Copy this block, change the number, question,
+             TL;DR and full answer. The full answer takes the same HTML as the qa/ pages
+             (<p>, <ul>, <code>, <a class="g" href="glossary.html#t-..."> for glossary links). -->
+        <article class="card" id="q1">
+            <h2><span class="num">1</span>Dummy question: what does the Mission Computer do?</h2>
+            <p class="tldr"><span class="label">TL;DR</span>Dummy short answer: it accepts delivery missions from the ground and flies them by commanding the flight controller.</p>
+            <details>
+                <summary>Full answer</summary>
+                <div class="answer">
+                    <p>Dummy full answer, here to show the layout. It will be replaced by the real one.</p>
+                    <ul>
+                        <li>A list item with <code>inline_code</code> in it.</li>
+                        <li>A list item with a glossary link: <a class="g" href="glossary.html#t-emc">emc</a>.</li>
+                    </ul>
+                    <p>A closing paragraph, so the spacing between paragraphs and lists is visible.</p>
+                </div>
+            </details>
+        </article>
+
+    </main>
+    <footer>Dotted links open the term in the <a href="glossary.html">glossary</a>.</footer>
+</div>
+
+<script>
+// Question count and the expand/collapse-all button.
+const answers = [...document.querySelectorAll("main details")];
+const toggle = document.getElementById("toggle");
+document.getElementById("count").textContent =
+    answers.length + (answers.length === 1 ? " question" : " questions");
+function refresh() {
+    toggle.textContent = answers.every(d => d.open) ? "Collapse all" : "Expand all";
+}
+toggle.addEventListener("click", () => {
+    const open = !answers.every(d => d.open);
+    answers.forEach(d => { d.open = open; });
+    refresh();
+});
+answers.forEach(d => d.addEventListener("toggle", refresh));
+</script>
+</body>
+</html>
