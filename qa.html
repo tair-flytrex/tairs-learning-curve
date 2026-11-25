@@ -58,6 +58,13 @@ main { padding-block: 20px 64px; display: grid; gap: 14px; }
 // Topics in use: Architecture, Services, OTA & firmware, Hardware, Messaging, Repo & tooling, Testing, Missions
 const QA = [
     {
+        file: "qa/2026-11-25-fc-firmware-version-check.html",
+        date: "2026-11-25",
+        q: "In the code, is there something that checks the firmware version struct from the FC?",
+        tags: ["OTA & firmware", "Messaging"],
+        summary: "Yes: firmware_updater reads AUTOPILOT_VERSION and compares middleware_sw_version to the profile's target before and after flashing. fcm only decodes and publishes it. Nothing blocks arming or flight on the FC version.",
+    },
+    {
         file: "qa/2026-11-19-facade-waypoints-from-gcs.html",
         date: "2026-11-19",
         q: "How does the drone facade receive waypoints from the GCS (in what structure)?",
