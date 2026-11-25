@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>In the code, is there something that checks the firmware version struct from the FC?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="intro">
+        <a class="back" href="../qa.html">&larr; All questions</a>
+        <div class="eyebrow">Q&amp;A · 2026-11-25</div>
+        <h1 class="question">In the code, is there something that checks the firmware version struct from the FC?</h1>
+        <div class="tag-row"><a class="tag" href="../qa.html#topic-ota-firmware">OTA &amp; firmware</a><a class="tag" href="../qa.html#topic-messaging">Messaging</a></div>
+    </header>
+    <main class="answer">
+<p>Yes. The struct is the <a class="g" href="../glossary.html#t-mavlink">MAVLink</a> <code>AUTOPILOT_VERSION</code> message. The <a class="g" href="../glossary.html#t-fc">FC</a>'s copy is read in two places, but only one of them compares the version against anything.</p>
+<p><strong>1. firmware_updater: the only real check</strong></p>
+<ul>
+<li><code>get_current_version()</code> in <code>services/firmware_updater/firmware_updater/updater/mavlink_updater.py</code> (line 116) waits for a heartbeat with <code>system_status</code> of standby or above, sends <code>MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES</code> up to 3 times, and waits for <code>AUTOPILOT_VERSION</code>.</li>
+<li>It returns the formatted <code>middleware_sw_version</code>. That is the Flyhawk version. <code>flight_sw_version</code> is the ArduCopter base and is not compared.</li>
+<li><code>update_if_needed()</code> in <code>updater/base.py</code> (line 64) compares it to the <a class="g" href="../glossary.html#t-profile">profile</a>'s <code>target_version</code>. Equal: nothing to do. Different: flash. Unreadable after the retries: flash anyway, because <code>can_flash_without_version()</code> is true for MAVLink devices. A board sitting in its bootloader counts as <code>0.0.0</code>.</li>
+<li><code>verify_update()</code> reads the version again after the flash and fails the update if it is not the target.</li>
+</ul>
+<p><strong>2. fcm: decodes and publishes, no validation</strong></p>
+<ul>
+<li><a class="g" href="../glossary.html#t-fcm">fcm</a> requests <code>AUTOPILOT_VERSION</code> once at initialization (<code>ardupilot_fc_commander.py</code>, <code>_request_mavlink_messages_on_initialization</code>).</li>
+<li><code>main.py</code> routes the reply to <code>AutopilotVersionToFcVersion</code> (<code>fc_state/mavlink_to_proto_converters/autopilot_version_to_fc_version.py</code>). It logs every field of the struct and publishes a <code>UavcanComponentVersion</code> on the <a class="g" href="../glossary.html#t-uavcanver">UavcanComponentVersion_fc</a> topic.</li>
+<li>The published string looks like <code>Flyhawk &lt;middleware&gt; &lt;flight_custom&gt; (ArduCopter &lt;flight_sw&gt;) (HW id: &lt;uid2&gt;)</code>.</li>
+<li>Each 32-bit version is unpacked as four bytes: major, minor, patch, type. The type byte becomes a <code>-dev</code>, <code>-alpha</code>, <code>-beta</code> or <code>-rc</code> suffix, or nothing for an official build.</li>
+</ul>
+<p><strong>Who reads that string</strong></p>
+<ul>
+<li><a class="g" href="../glossary.html#t-software_updater">software_updater</a>: <code>FirmwareVersionParser</code> in <code>firmware_versions.py</code> takes the first dotted triple (for example <code>5.4.6</code>), and <code>ModuleVersions</code> rolls it up per device for the report to <a class="g" href="../glossary.html#t-oversight">Oversight</a>.</li>
+<li><a class="g" href="../glossary.html#t-emc">emc</a> subscribes to the same topic in <code>FcmCommunicator.java</code> (<code>latestUavcanComponentVersionFc</code>).</li>
+</ul>
+<p><strong>The FTS has the same thing in emc</strong></p>
+<ul>
+<li><code>FlytrexFts.processAutopilotVersion()</code> handles the <a class="g" href="../glossary.html#t-fts">FTS</a>'s own <code>AUTOPILOT_VERSION</code>. It logs it with <code>MavlinkConnectionWrapper.logAutopilotVersion()</code>, builds the string with <code>getFcVersion()</code>, and emc publishes it as <a class="g" href="../glossary.html#t-ftsversion">FtsVersion</a>. Despite the name, <code>getFcVersion()</code> is only called for the FTS.</li>
+</ul>
+<p><strong>What does not exist</strong></p>
+<ul>
+<li>There is no minimum-version or compatibility gate. Nothing refuses to arm or fly because of the FC version.</li>
+<li><code>MavlinkConnectionWrapper.hasCapability()</code> can test the <code>capabilities</code> bitmask, but nothing calls it.</li>
+<li>Side note: <code>autopilot_version_to_fc_version.py</code> line 20 has a leftover debug <code>print("RAZFCM: ...")</code>.</li>
+</ul>
+    </main>
+    <footer>Dotted links open the term in the <a href="../glossary.html">glossary</a>.</footer>
+</div>
+</body>
+</html>
